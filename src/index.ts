@@ -10,6 +10,8 @@ import fieldTechRoutes from './modules/fieldTech/fieldTech.routes.js';
 import customerRoutes from './modules/customer/customer.routes.js';
 import repairRoutes from './modules/repair/repair.routes.js';
 import commentRoutes from './modules/jobs/comments.routes.js';
+import rolesRoutes from './modules/roles/roles.routes.js';
+
 
 dotenv.config();
 
@@ -17,12 +19,16 @@ const app: Express = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+    origin: process.env.FRONTEND_URL,
+    credentials: true,
+  }));
 app.use(express.json());
 
 
 // API Routes
-app.use('/api/v1/auth', authRoutes); // <-- Mount the routes
+app.use('/api/v1/auth', authRoutes); 
+app.use('/api/v1/roles', rolesRoutes);
 app.use('/api/v1/jobs', jobRoutes);
 app.use('/api/v1/cs', csRoutes);
 app.use('/api/v1/transport', transportRoutes);

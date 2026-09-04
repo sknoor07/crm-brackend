@@ -11,12 +11,12 @@ export interface TokenPayload {
 
 // Short-lived Access Token (15 mins)
 export const generateAccessToken = (payload: TokenPayload): string => {
-  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: '30m' });
+  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: '1d' });
 };
 
 // Long-lived Refresh Token (14 days, as requested)
 export const generateRefreshToken = (userId: string): string => {
-  return jwt.sign({ userId }, REFRESH_SECRET, { expiresIn: '1hr' });
+  return jwt.sign({ userId }, REFRESH_SECRET, { expiresIn: '14d' });
 };
 
 export const verifyAccessToken = (token: string): TokenPayload => {

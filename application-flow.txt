@@ -1,0 +1,334 @@
+Project: CRM Backend (crm-backend)
+Generated: 2026-09-04T10:29:12+05:30
+
+Purpose of this document
+------------------------
+This file explains the full flow, architecture, and operational details of the CRM backend project so an AI agent (or developer) can understand the project end-to-end and perform tasks such as feature work, debugging, testing, deployment, and design decisions. It is organized into sections: overview, technology stack, repository layout, data model, API endpoints and flows, authentication & authorization, third-party integrations, background jobs, configuration, development and deployment instructions, logging and monitoring, testing, security considerations, known limitations and TODOs, and recommended next tasks for an AI agent.
+
+1. High-level overview
+----------------------
+- Purpose: A backend service for a CRM (Customer Relationship Management) system providing RESTful APIs (and possibly webhooks) to manage customers, contacts, companies, deals, users, authentication, and reporting.
+- Core responsibilities:
+  - Expose authenticated APIs for CRUD operations on CRM entities (customers, contacts, companies, deals, tasks, notes).
+  - Handle user management and access control.
+  - Persist data to a relational database (likely PostgreSQL or MySQL depending on configs).
+  - Run background jobs for async work (email sending, import/export, reports).
+  - Integrate with third-party services (email provider, external auth, analytics).
+  - Provide observability (logs, metrics) and error handling.
+
+2. Technology stack (assumptions)
+---------------------------------
+- Language: Node.js (or TypeScript) / Express or NestJS OR Python / Django or Flask — adjust to actual repo. Typical stacks:
+  - Node.js + Express + TypeScript
+  - ORM: TypeORM, Sequelize, or Prisma
+  - Database: PostgreSQL
+  - Auth: JWT (access + refresh) and bcrypt for passwords
+  - Background jobs: Bull / BullMQ (Redis) or Celery (Python)
+  - Caching: Redis
+  - Testing: Jest or Mocha/Chai
+  - Containerization: Docker
+  - CI/CD: GitHub Actions / other
+
+Note: The specific frameworks used by this repo should be identified by scanning package.json, requirements.txt, or equivalent. The AI agent should first list exact dependencies to confirm assumptions.
+
+3. Repository layout (expected)
+-------------------------------
+- src/ or app/: application source code
+  - src/controllers/ or src/routes/: API route handlers
+  - src/services/: business logic, use-case implementations
+  - src/models/ or src/entities/: database models / ORM schema
+  - src/middleware/: auth, validation, error handling
+  - src/utils/: helpers, formatters
+  - src/jobs/: background job processors
+  - src/config/: configuration logic
+  - src/tests/: unit/integration tests
+- migrations/: DB migration files
+- docker-compose.yml: dev stack (db, redis)
+- Dockerfile
+- package.json / requirements.txt / pyproject.toml
+- .env.example: environment variables
+- README.md
+
+4. Data model (core entities)
+-----------------------------
+This section describes typical CRM entities and relationships. Confirm with actual schema.
+
+- User
+  - id (UUID / int)
+  - email (unique)
+  - passwordHash
+  - name
+  - role (admin, manager, user)
+  - createdAt, updatedAt
+
+- Company
+  - id
+  - name
+  - industry
+  - website
+  - createdAt, updatedAt
+
+- Contact
+  - id
+  - companyId -> Company
+  - firstName, lastName
+  - email, phone
+  - role/title
+  - createdAt, updatedAt
+
+- Deal
+  - id
+  - companyId
+  - contactId (optional)
+  - name
+  - amount
+  - stage (prospecting, qualified, proposal, closed-won, closed-lost)
+  - ownerId -> User
+  - closeDate
+  - createdAt, updatedAt
+
+- Task / Activity
+  - id
+  - userId
+  - relatedEntity (deal/contact/company)
+  - type (call, meeting, email)
+  - dueDate, status
+
+- Note
+  - id
+  - userId
+  - relatedEntityId
+  - text
+
+Relationships:
+- Company hasMany Contacts
+- Company hasMany Deals
+- User owns many Deals and Tasks
+
+Indexes:
+- Unique index on user.email
+- Foreign key indexes on companyId, contactId, ownerId
+
+5. API endpoints and application flow
+------------------------------------
+Provide RESTful APIs with consistent patterns and HTTP status codes.
+
+Common endpoint patterns (examples):
+
+Authentication:
+- POST /api/auth/register
+  - Input: { name, email, password }
+  - Process: validate, hash password, create user, return token or 201 created
+- POST /api/auth/login
+  - Input: { email, password }
+  - Process: validate, compare password, return { accessToken, refreshToken, user }
+- POST /api/auth/refresh
+  - Input: { refreshToken }
+  - Process: validate refresh token, issue new access token
+- POST /api/auth/logout
+  - Input: { refreshToken }
+  - Process: revoke refresh token / delete from DB or blacklist
+
+User routes:
+- GET /api/users/me
+  - Auth required. Returns current user profile
+- GET /api/users/:id
+  - Auth + role check
+- PUT /api/users/:id
+  - Update profile or role (admin only)
+
+Companies:
+- GET /api/companies
+  - Query: pagination (page, pageSize), filters
+- POST /api/companies
+  - Create company
+- GET /api/companies/:id
+  - Return company with contacts and deals (optional include param)
+- PUT /api/companies/:id
+  - Update company
+- DELETE /api/companies/:id
+  - Soft delete recommended
+
+Contacts:
+- GET /api/contacts
+- POST /api/contacts
+- GET /api/contacts/:id
+- PUT /api/contacts/:id
+- DELETE /api/contacts/:id
+
+Deals:
+- GET /api/deals
+- POST /api/deals
+- GET /api/deals/:id
+- PUT /api/deals/:id (update stage, amount)
+- POST /api/deals/:id/close
+  - Change stage to closed-won/closed-lost, trigger pipeline workflows
+
+Tasks/Activities:
+- CRUD endpoints for tasks. Optionally scheduling and reminders.
+
+Notes and Attachments:
+- POST /api/{entity}/{id}/notes
+- GET /api/{entity}/{id}/notes
+- Attachments endpoint may integrate with S3 or cloud storage
+
+Search & reporting:
+- GET /api/search?q=...
+- GET /api/reports/deals?from=&to=&groupBy=owner
+
+API flow examples:
+- Creating a Deal flow:
+  1. Client POST /api/deals with payload including companyId and optional contactId.
+  2. Server validates payload, checks owner permissions, creates Deal row, returns 201 with deal object.
+  3. Background job queued to notify owner (email or in-app) and update dashboards.
+
+- User login flow:
+  1. Client POST /api/auth/login with credentials.
+  2. Server verifies credentials, creates JWT access token (short-lived) and refresh token (long-lived stored server-side or in DB).
+  3. Tokens returned; client uses access token in Authorization header for subsequent requests.
+
+6. Authentication & Authorization
+---------------------------------
+- Authentication: JWT-based access tokens, refresh tokens for renewing access.
+- Passwords hashed using bcrypt or argon2.
+- Refresh tokens either stored in DB (with revoked flag) or in a token store (Redis).
+- Authorization: Role-based access control (RBAC) with middleware checking user roles and ownership rules (for example, only a deal owner or admin can modify a deal).
+- Rate limiting: Protect auth endpoints and public endpoints using IP-based rate limit (express-rate-limit or API gateway)
+
+7. Input validation & error handling
+------------------------------------
+- Validate inputs using a schema validation library (Joi, Yup, class-validator).
+- Use consistent error response format: { status: "error", message: "...", code: "INVALID_INPUT", details: {...} }
+- Use middleware to centralize error handling and map exceptions to HTTP status codes.
+- Return 400 for validation, 401 for auth errors, 403 for forbidden, 404 for not found, 500 for server errors.
+
+8. Background jobs & async workflows
+------------------------------------
+- Use a message queue or job library (Bull/BullMQ with Redis or RabbitMQ).
+- Jobs examples: sendEmail, importCSV, exportData, recalcReports, webhookDelivery, notificationDelivery.
+- Jobs should be idempotent and have retry policies. Failed jobs should land in a DLQ (dead-letter queue) or be logged for manual investigation.
+
+9. Third-party integrations
+---------------------------
+- Email sending: SendGrid, Mailgun, SES.
+- File storage: AWS S3, GCP Storage, or local storage in dev.
+- Analytics: Segment, Mixpanel.
+- Auth providers (optional): OAuth providers (Google, Microsoft) for SSO.
+
+10. Configuration and environment variables
+-------------------------------------------
+Keep secrets out of repo; use env vars. Provide .env.example.
+Key variables:
+- NODE_ENV (development|production|test)
+- PORT
+- DATABASE_URL or DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
+- REDIS_URL
+- JWT_SECRET, JWT_REFRESH_SECRET
+- S3_BUCKET, S3_KEY, S3_SECRET
+- EMAIL_PROVIDER_API_KEY
+- LOG_LEVEL
+
+11. Database migrations
+------------------------
+- Use migrations for schema evolution (migration files in migrations/).
+- Migration-run during deploy or CI (example: npm run migrate or prisma migrate deploy).
+- Backups and rollback plan described in deploy docs.
+
+12. Logging, metrics and monitoring
+----------------------------------
+- Structured logging (JSON) with timestamp and request trace id.
+- Request logging middleware records method, path, status, latency, userId (if any).
+- Integrate with error tracking (Sentry) for exceptions and performance traces.
+- Expose metrics endpoint (/metrics) for Prometheus scraping.
+
+13. Testing strategy
+--------------------
+- Unit tests for services and utilities.
+- Integration tests that run against an ephemeral test database (Postgres test container) and test HTTP endpoints.
+- End-to-end tests (optional) for critical flows.
+- CI pipeline runs tests and linting on PRs.
+- Use factory fixtures and test helpers to create DB state.
+
+14. Security considerations
+--------------------------
+- Use HTTPS in production, enable secure cookie flags if cookies are used.
+- Protect against SQL injection by using parameterized queries via ORM.
+- Sanitize inputs that will be rendered or stored.
+- Limit attachment upload size and scan for malware if needed.
+- Ensure CORS policy is restrictive and configured per expected frontends.
+- Rotate secrets regularly and use a secret manager in production.
+
+15. Deployment & run instructions
+---------------------------------
+Development flow (typical):
+- Copy .env.example to .env and fill credentials
+- Install dependencies: e.g., npm install or pip install -r requirements.txt
+- Start dev services: docker-compose up -d (for DB + Redis)
+- Run migrations: npm run migrate
+- Start server: npm run dev or node dist/index.js
+
+Production flow (typical):
+- Build container image with Dockerfile
+- Run migrations in deploy step
+- Deploy to Kubernetes, ECS, or a managed host
+- Use managed DB and Redis and secret manager for env vars
+
+16. Observability & support
+---------------------------
+- Health check endpoints: GET /health or GET /ping
+- Readiness probes for container orchestration
+- Provide runbooks for common incidents (DB connection lost, job queue backlog, high error rate)
+
+17. Developer workflow & conventions
+------------------------------------
+- Branching: feature/*, fix/*, chore/*; PR-based reviews
+- Code style: Follow eslint/prettier or project linting rules
+- Commit message style: Conventional commits (optional)
+- Document new endpoints in README or an API spec (OpenAPI / Swagger)
+
+18. Known limitations and TODOs
+------------------------------
+- Replace this section with actual project-specific TODOs after inspection.
+- Examples: missing tests for X, unimplemented export route, refresh token revocation not implemented.
+
+19. How an AI agent can help (recommended tasks)
+-----------------------------------------------
+1) Codebase reconnaissance
+   - Identify frameworks and exact dependencies (package.json, requirements.txt).
+   - Extract actual database schema and list all migrations.
+2) Generate or update API documentation
+   - Create OpenAPI spec from routes/controllers.
+3) Implement missing features
+   - Implement auth refresh token revocation, role-based checks, background job retry handling.
+4) Create tests
+   - Add unit tests and integration tests for critical endpoints.
+5) Security audit
+   - Scan for insecure patterns, unsanitized inputs, secrets in code.
+6) Performance improvements
+   - Profile slow endpoints, add DB indexes, introduce caching.
+7) Deployment automation
+   - Create or improve Dockerfile, docker-compose, and CI workflow.
+
+20. Orientation checklist for the AI agent (first actions)
+---------------------------------------------------------
+- List top-level files and inspect package.json or requirements to confirm tech stack.
+- Open src/ to find server entrypoint (index.js, app.js, main.ts) and note middleware for auth and error handling.
+- Locate config or .env.example and list all env vars.
+- Inspect migrations/ and models/ to build canonical data model.
+- Run tests locally (if possible) to ensure environment is reproducible.
+
+21. Contact & context
+---------------------
+- Project owner: (fill with human owner / team contact)
+- Where to find more: README.md, design docs, API spec file if present
+
+Appendix: Useful conventions for parsing this document
+-----------------------------------------------------
+- When referencing endpoints, prefer the exact route strings found in the codebase rather than the examples here.
+- Where ambiguity exists (framework choices, ORM) the AI agent should update the document to reflect actual repo details.
+
+End of document
+
+
+Notes for the human who asked:
+- This document is intentionally framework-agnostic in many parts. Ask the AI agent to first identify the exact frameworks, packages, and entry points in the repository and then regenerate a tailored flow with concrete file paths, command examples, and code snippets extracted from the codebase.

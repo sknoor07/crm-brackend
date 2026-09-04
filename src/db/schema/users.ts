@@ -15,7 +15,7 @@ export const roles = pgTable('roles', {
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: varchar('email', { length: 255 }).notNull().unique(),
-  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  passwordHash: varchar('password_hash', { length: 255 }),
   userType: varchar('user_type', { length: 20 }).notNull().default('customer'), // 'employee' or 'customer'
   phone: varchar('phone', { length: 20 }),
   isActive: boolean('is_active').default(true),
@@ -57,6 +57,7 @@ export const employeeProfiles = pgTable('employee_profiles', {
 
   // Work Data
   specializations: jsonb('specializations').default('[]'), 
+  
 });
 
 /**

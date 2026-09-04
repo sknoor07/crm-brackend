@@ -1,13 +1,18 @@
 import { z } from 'zod';
 
 // We separate the base auth requirements...
-const baseAuthSchema = z.object({
+const baseUserSchema = z.object({
   email: z.string().email("Invalid email address"),
+});
+
+const passwordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters long"),
 });
 
+
+
 // ...from the strict Employee compliance requirements
-export const registerEmployeeSchema = baseAuthSchema.extend({
+export const registerEmployeeSchema = baseUserSchema.extend({
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
   phone: z.string().optional(),
@@ -37,7 +42,9 @@ export const registerEmployeeSchema = baseAuthSchema.extend({
   
   emergencyContactName: z.string().optional(),
   emergencyContactPhone: z.string().optional(),
-  specializations: z.array(z.string()).optional() 
+  specializations: z.array(z.string()).optional(),
+  roleIds: z.array(z.string().uuid())
+    .min(1, 'At least one role is required'),
 });
 
 export const loginSchema = z.object({

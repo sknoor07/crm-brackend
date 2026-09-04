@@ -1,5 +1,6 @@
 import { pgEnum, pgTable, uuid, varchar, text, timestamp, decimal, boolean } from 'drizzle-orm/pg-core';
 import { users } from './users.js';
+import { warranties } from './warranties.js';
 
 export const jobStatusValues = [
   'pending_cs_verification',
@@ -55,6 +56,14 @@ export const jobs = pgTable('jobs', {
   assignedRepairTechId: uuid('assigned_repair_tech_id').references(() => users.id),
   requestedComponents: text('requested_components'),
   technicianNotes: text('technician_notes'),
+  //warranty and service details
+  // Add to existing jobs table:
+warrantyId: uuid('warranty_id').references(() => warranties.id),
+originalJobId: uuid('original_job_id'), // For repeat/warranty jobs
+deviceSerialNumber: varchar('device_serial_number', { length: 50 }),
+issueCategory: varchar('issue_category', { length: 50 }), // e.g., 'display', 'motherboard', etc.
+isWarrantyClaim: boolean('is_warranty_claim').default(false),
+baseRepairCost: decimal('base_repair_cost', { precision: 10, scale: 2 }),
   
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
