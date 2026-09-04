@@ -1,0 +1,344 @@
+CRM BACKEND IMPLEMENTATION STATUS
+Date: 2026-09-03
+
+============================================================
+CHANGES COMPLETED TODAY
+============================================================
+
+AUTHENTICATION AND SECURITY
+
+1. Added secure employee account invitation acceptance.
+2. Added one-time invitation tokens.
+3. Stored only hashed invitation tokens in the database.
+4. Added password setup through invitation acceptance.
+5. Added refresh-token storage in the refresh_tokens table.
+6. Added POST /api/v1/auth/refresh.
+7. Added refresh JWT signature validation.
+8. Added database validation for active, unexpired, non-revoked refresh tokens.
+9. Added inactive-user validation.
+10. Added expired refresh-token cleanup during login and refresh requests.
+11. Added HTTP-only refresh-token cookie handling.
+12. Added direct refresh-cookie parsing without requiring cookie-parser.
+
+JOB CREATION
+
+13. Added customer self-service job creation:
+    POST /api/v1/customer/jobs
+14. Customer-created jobs start at pending_cs_verification.
+15. CS-created jobs start directly at ready_for_pickup.
+16. Customer ID is taken from the authenticated access token.
+17. Added required phone validation.
+18. Added required address validation.
+19. Prevented job creation when phone or address is missing.
+20. Added existing customer profile update/upsert.
+21. Wrapped customer, profile, job, invitation, and history creation in a transaction.
+22. Replaced weak four-digit random job numbers.
+23. Added UUID-derived job numbers with database uniqueness protection.
+
+DEVICE CATEGORIES
+
+24. Added GET /api/v1/jobs/device-categories.
+25. Categories are loaded from device_service_charges.
+26. Job creation rejects unknown device categories.
+27. Invalid values such as "vivobook" are rejected unless configured as a category.
+
+JOB STATUS WORKFLOW
+
+28. Added controlled PostgreSQL job statuses.
+29. Added an allowed status-transition map.
+30. Added transactional status update and history insertion.
+31. Status updates and history records now succeed or fail together.
+32. Switched Neon database access from neon-http to pooled neon-serverless
+    to support transactions.
+33. Added status history records for workflow transitions.
+
+Supported workflow statuses include:
+
+pending_cs_verification
+ready_for_pickup
+pending_pickup
+pending_final_quote
+awaiting_customer_approval
+repair_in_progress
+repair_completed
+in_transit_to_lab
+arrived_at_lab
+in_lab_diagnosis
+out_for_delivery
+delivered
+closed
+
+TECHNICIAN AND REPAIR WORKFLOW
+
+34. Separated technician assignments into:
+    assignedPickupTechId
+    assignedRepairTechId
+    assignedDeliveryTechId
+35. Added field-technician authorization for on-site repairs.
+36. Added lab-technician authorization for lab repairs.
+37. Added admin authorization handling.
+38. Added repairLocation tracking.
+39. Added customer-site repair tracking.
+40. Added lab repair tracking.
+41. Added technician transit-to-lab workflow.
+42. Added Transport Manager lab-receipt workflow.
+43. Added lab-technician assignment workflow.
+44. Added delivery restrictions for completed lab repairs.
+45. Fixed on-site quote-request persistence.
+46. Saved requested components.
+47. Saved technician notes.
+48. Added missing repair validation schemas.
+49. Added lab quote validation.
+50. Added repair completion validation.
+51. Fixed TypeScript and Zod validation errors.
+
+CUSTOMER AND CUSTOMER-SERVICE WORKFLOW
+
+52. Added customer job-ownership checks.
+53. Prevented customers from responding to another customer's quote.
+54. Wired CS verification routes.
+55. Wired final-quote routes.
+56. Wired pending-quote routes.
+57. Wired job-closure routes.
+58. Integrated transactional transitions across customer, CS, transport,
+    field-tech, and repair modules.
+
+DOCUMENTATION AND TESTING PREPARATION
+
+59. Created README.md with API, request, response, role, workflow,
+    database-table, and relationship documentation.
+60. Created testsprite/openapi.yaml.
+61. Created testsprite/api-test-plan.md.
+62. Documented TestSprite fixtures, validation cases, permissions,
+    lifecycle, transaction, and audit tests.
+63. Confirmed GET /api/health returns HTTP 200.
+64. Confirmed TypeScript compilation with:
+    npx tsc --noEmit
+
+The implementation work covered 22 primary files and approximately
+2,314 lines of changes.
+
+
+============================================================
+FUTURE IMPLEMENTATION ROADMAP
+============================================================
+
+1. CUSTOMER ORDER LISTING
+
+Add:
+    GET /api/v1/customer/orders
+
+Requirements:
+- Return only orders belonging to the authenticated customer.
+- Never trust customerId from query parameters or request body.
+- Add pagination.
+- Add optional status filtering.
+- Include order items.
+- Include current job status.
+- Include quote and payment summary.
+
+2. SEPARATE JOB CLOSURE TABLE
+
+Create:
+    job_closures
+
+Recommended fields:
+    id
+    job_id
+    closed_by_user_id
+    closure_reason
+    customer_confirmed
+    payment_confirmed
+    notes
+    closed_at
+
+The jobs table can retain current_status = closed, while job_closures
+stores the closure audit information.
+
+Closure must verify:
+- Repair is completed.
+- Device is delivered when applicable.
+- Payment is completed.
+- Closure reason is provided.
+- Only authorized CS users can close the job.
+
+3. MULTIPLE ITEMS PER ORDER
+
+Current model:
+    one order = one repair job
+
+Recommended model:
+    orders
+    order_items
+    jobs
+
+Relationships:
+    one customer -> many orders
+    one order -> many order_items
+    one order_item -> one job
+
+Each order item should have its own:
+- Device category.
+- Issue description.
+- Quote.
+- Repair status.
+- Technician assignments.
+- Lifecycle history.
+
+4. COMPLETE TICKET-LEVEL LIFECYCLE TRACKING
+
+Expand status history into a complete event history table:
+    job_events
+
+Recommended fields:
+    id
+    job_id
+    event_type
+    from_status
+    to_status
+    performed_by_user_id
+    performed_by_role
+    description
+    metadata
+    created_at
+
+Track:
+- Ticket creation.
+- Customer verification.
+- Pickup assignment.
+- Device pickup.
+- Technician arrival.
+- Repair start.
+- Component request.
+- Quote generation.
+- Quote approval or rejection.
+- Device movement to lab.
+- Lab receipt.
+- Lab technician assignment.
+- Repair completion.
+- Delivery assignment.
+- Device delivery.
+- Payment receipt.
+- Job closure.
+- Comments and attachments.
+
+5. CS BYPASS CUSTOMER APPROVAL
+
+Add:
+    POST /api/v1/customer-service/jobs/:jobId/bypass-customer-approval
+
+Example request:
+{
+  "reason": "Customer approved quote over phone",
+  "customerConfirmationReference": "CALL-2026-0091"
+}
+
+Transition:
+    awaiting_customer_approval -> repair_in_progress
+
+Requirements:
+- CS role authorization.
+- Mandatory reason.
+- Employee ID recorded.
+- Timestamp recorded.
+- Confirmation reference recorded.
+- Audit event created.
+- No silent bypassing of customer approval.
+
+6. ON-SITE REPAIR PIVOT TO LAB
+
+Support:
+    pending_pickup
+        -> repair_in_progress
+        -> in_transit_to_lab
+        -> arrived_at_lab
+        -> in_lab_diagnosis
+
+Add an endpoint such as:
+    POST /api/v1/field-tech/jobs/:jobId/move-to-lab
+
+Example request:
+{
+  "reason": "Motherboard damage found during on-site repair",
+  "technicianNotes": "Repair cannot be completed at customer location"
+}
+
+Requirements:
+- Only the assigned field technician can request it.
+- Job must be at the customer site.
+- Reason is mandatory.
+- Existing assignments are preserved.
+- Transport Manager must confirm lab receipt.
+- Transition, reason, and notes are transactional.
+- Add repair_in_progress -> in_transit_to_lab to the transition map.
+
+7. PAYMENT MODULE
+
+Create:
+    payments
+
+Track:
+- Amount.
+- Payment status.
+- Payment method.
+- Transaction reference.
+- Paid timestamp.
+- Refund status.
+- Recorded-by user.
+
+Block job closure when payment is required but unpaid.
+
+8. DATABASE MIGRATIONS
+
+Generate and apply proper Drizzle migrations for:
+- New columns.
+- New enums.
+- New tables.
+- New indexes.
+- New constraints.
+- Status history.
+- Invitations.
+- Technician assignment fields.
+
+Recommended indexes:
+    jobs.customer_id
+    jobs.current_status
+    job_status_history.job_id
+    refresh_tokens.expires_at
+    orders.customer_id
+
+9. NEON SCHEDULED CLEANUP
+
+Configure pg_cron in Neon and schedule hourly cleanup:
+
+SELECT cron.schedule(
+  'delete-expired-refresh-tokens',
+  '0 * * * *',
+  $$
+    DELETE FROM refresh_tokens
+    WHERE expires_at <= NOW();
+  $$
+);
+
+Verify with:
+
+SELECT *
+FROM cron.job;
+
+Note: Neon pg_cron jobs require an active compute. If scale-to-zero
+is enabled, use an external scheduler or disable scale-to-zero.
+
+10. AUTOMATED TESTING
+
+Remaining testing work:
+- Add a real automated test runner.
+- Execute the TestSprite plan.
+- Test authentication and refresh-token behavior.
+- Test role-based authorization.
+- Test every valid and invalid status transition.
+- Test transaction rollback behavior.
+- Test customer ownership isolation.
+- Test category validation.
+- Test complete on-site and lab workflows.
+- Test closure and payment rules.
+
