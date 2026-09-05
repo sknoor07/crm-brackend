@@ -6,11 +6,13 @@ import authRoutes from './modules/auth/auth.routes.js'; // <-- Import the routes
 import jobRoutes from './modules/jobs/jobs.routes.js';
 import csRoutes from './modules/customerService/cs.routes.js';
 import transportRoutes from './modules/transport/transport.routes.js';
-import fieldTechRoutes from './modules/fieldTech/fieldTech.routes.js';
+import fieldTechRoutes from './modules/fieldTech/transportPerson.routes.js';
 import customerRoutes from './modules/customer/customer.routes.js';
 import repairRoutes from './modules/repair/repair.routes.js';
 import commentRoutes from './modules/jobs/comments.routes.js';
 import rolesRoutes from './modules/roles/roles.routes.js';
+import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
+import adminRoutes from './modules/admin/admin.routes.js';
 
 
 dotenv.config();
@@ -29,6 +31,8 @@ app.use(express.json());
 // API Routes
 app.use('/api/v1/auth', authRoutes); 
 app.use('/api/v1/roles', rolesRoutes);
+app.use('/api/v1/dashboard', dashboardRoutes);
+app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/jobs', jobRoutes);
 app.use('/api/v1/cs', csRoutes);
 app.use('/api/v1/transport', transportRoutes);

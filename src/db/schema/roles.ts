@@ -2,20 +2,21 @@ import {
   pgTable,
   uuid,
   varchar,
+  text,
+  jsonb,
   timestamp,
 } from 'drizzle-orm/pg-core';
 
-import { users } from './users.js';
-
-export const teams = pgTable('teams', {
+export const roles = pgTable('roles', {
   id: uuid('id').defaultRandom().primaryKey(),
 
   name: varchar('name', {
     length: 50,
   }).notNull().unique(),
 
-  managerId: uuid('manager_id')
-    .references(() => users.id),
+  description: text('description'),
+
+  permissions: jsonb('permissions'),
 
   createdAt: timestamp('created_at')
     .defaultNow(),

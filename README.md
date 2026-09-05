@@ -1,130 +1,201 @@
 # CRM Backend API
 
-Repair-service workflow API built with Express, TypeScript, Drizzle ORM, and PostgreSQL.
+REST API for the CRM repair workflow.
 
-## TestSprite testing
-
-Use the machine-readable API contract at [testsprite/openapi.yaml](./testsprite/openapi.yaml) and the execution plan at [testsprite/api-test-plan.md](./testsprite/api-test-plan.md).
-
-## Running the API
-
-```bash
-npm install
-npm run dev
-```
-
-Initialize the database schema and required test data:
-
-```bash
-npm run db:setup
-```
-
-The seed creates one test user for each role. They all use the password `TestPassword123!` and have emails such as `admin@test.example.com` and `customer-service@test.example.com`.
-
-Default base URL:
+## Base URL
 
 ```text
 http://localhost:5000
 ```
 
-All versioned endpoints use:
+API routes are prefixed with `/api/v1`, except the health check.
 
-```text
-/api/v1
+## Run locally
+
+```bash
+npm install
+npm run db:setup
+npm run dev
 ```
 
-Protected endpoints require:
+The port is controlled by `PORT` and defaults to `5000`.
+
+## Authentication
+
+Protected routes require an access token:
 
 ```http
 Authorization: Bearer <accessToken>
-Content-Type: application/json
 ```
 
-## Roles
+`POST /api/v1/auth/login` also sets an HTTP-only `refreshToken` cookie. Send cookies when calling `POST /api/v1/auth/refresh`.
 
-| Role | Main responsibility |
-| --- | --- |
-| `admin` | Full administrative access |
-| `customer` | Create own requests and approve/reject own quotes |
-| `customer_service` | Create/verify jobs, generate quotes, close jobs |
-| `transport_manager` | Assign pickup/delivery technicians and receive devices at the lab |
-| `repair_manager` | Assign lab technicians |
-| `repair_person` | Perform field/lab technician actions |
+## Common errors
 
-## Standard error responses
-
-Authentication and authorization errors:
+### Authentication
 
 ```json
-{
-  "error": "Forbidden: Your role does not have permission to perform this action"
-}
+{ "error": "Authentication token missing or malformed" }
 ```
 
-Validation errors:
+```json
+{ "error": "Invalid or expired access token" }
+```
+
+### Authorization
+
+```json
+{ "error": "Forbidden: No roles assigned" }
+```
+
+```json
+{ "error": "Forbidden: Your role does not have permission to perform this action" }
+```
+
+### Validation
+
+Validation errors return `400`:
 
 ```json
 {
   "status": "error",
   "message": "Validation failed",
   "errors": [
-    {
-      "field": "jobId",
-      "message": "Invalid job ID format"
-    }
+    { "field": "jobItemId", "message": "Invalid job item ID format" }
   ]
 }
 ```
 
-## Authentication APIs
+Validation middleware can validate JSON bodies, path parameters, or query strings and writes the parsed Zod result back to the request. Existing query-based endpoints are not currently registered. For example, `GET /api/v1/technician/:jobId/items` validates `jobId` as a UUID and returns the standard validation error for malformed values.
 
-### Register an employee
+Unless an endpoint documents a more specific response, database or unexpected failures return `500`:
 
-```http
-POST /api/v1/auth/register
+```json
+{ "error": "Internal server error" }
 ```
 
-Creates an employee login and employee profile. The new employee is initially required to change their password.
+## Response row shapes
 
-Request:
+Several endpoints return complete database rows. The following abbreviated examples show the shape; the actual response can contain every column on the returned row.
+
+### Job row
 
 ```json
 {
-  "email": "john@example.com",
-  "password": "SecurePassword123",
-  "firstName": "John",
-  "lastName": "Smith",
-  "phone": "9876543210",
-  "currentAddress": "Mumbai",
-  "permanentAddress": "Pune"
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "jobNumber": "JOB-20260905-0001",
+  "customerId": "550e8400-e29b-41d4-a716-446655440001",
+  "currentStatus": "in_progress",
+  "transportManagerId": null,
+  "assignedTransportTeamPersonId": null,
+  "repairManagerId": null,
+  "assignedDeliveryTechId": null,
+  "createdAt": "2026-09-05T10:00:00.000Z",
+  "updatedAt": "2026-09-05T10:00:00.000Z"
 }
 ```
+
+### Job item row
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440002",
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "deviceCategory": "Laptop",
+  "deviceSerialNumber": "SN12345",
+  "issueDescription": "Laptop does not power on",
+  "issueCategory": null,
+  "repairLocation": "lab",
+  "currentStatus": "pending_cs_verification",
+  "assignedRepairPersonId": null,
+  "estimatedComponentsCost": "2500.00",
+  "finalComponentsCost": null,
+  "serviceChargeApplied": "500.00",
+  "isFinalQuoteApproved": false,
+  "requestedComponents": null,
+  "diagnosisNotes": null,
+  "repairNotes": null,
+  "baseRepairCost": null,
+  "isWarrantyClaim": false,
+  "originalJobItemId": null,
+  "createdAt": "2026-09-05T10:00:00.000Z",
+  "updatedAt": "2026-09-05T10:00:00.000Z"
+}
+```
+
+`<full jobs row>`, `<full job_items row>`, and similar text below mean the corresponding complete row described above, not a literal string returned by the server.
+
+# Endpoint reference
+
+There are 47 live endpoints: 46 mounted module endpoints and `GET /api/health`. The warranties router exists but is empty and currently exposes no warranty endpoint.
+
+## Health
+
+### `GET /api/health`
+
+Authentication: none.
+
+Response `200`:
+
+```json
+{ "status": "OK", "message": "API is running smoothly!" }
+```
+
+## Authentication
+
+### `POST /api/v1/auth/register`
+
+Authentication: Bearer token. Role: `admin`.
+
+Request body:
+
+```json
+{
+  "email": "employee@example.com",
+  "firstName": "Anita",
+  "lastName": "Sharma",
+  "phone": "+919876543210",
+  "dateOfBirth": "1992-04-15",
+  "aadhaarNumber": "123456789012",
+  "panNumber": "ABCDE1234F",
+  "uanNumber": "123456789012",
+  "currentAddress": "Bengaluru",
+  "permanentAddress": "Mysuru",
+  "bankAccountNumber": "1234567890",
+  "bankIfscCode": "SBIN0001234",
+  "bankName": "State Bank",
+  "emergencyContactName": "Ravi Sharma",
+  "emergencyContactPhone": "+919876543211",
+  "specializations": ["Laptop repair"],
+  "roleIds": ["550e8400-e29b-41d4-a716-446655440003"]
+}
+```
+
+Required: `email`, `firstName`, `lastName`, `roleIds`. `roleIds` must contain at least one UUID. Aadhaar/UAN are 12 digits, PAN follows `AAAAA9999A`, and IFSC follows `AAAA0999999`. Other employee fields are optional strings; `dateOfBirth` must be date-parseable.
 
 Response `201`:
 
 ```json
 {
-  "message": "Employee created successfully",
-  "user": {
-    "id": "employee-uuid",
-    "email": "john@example.com"
-  }
+  "message": "Employee registered successfully",
+  "employee": {
+    "id": "550e8400-e29b-41d4-a716-446655440004",
+    "email": "employee@example.com"
+  },
+  "invitationToken": "64-character-hex-token"
 }
 ```
 
-### Login
+The invitation token is only returned in non-production environments. Duplicate email and invalid role IDs return `400`.
 
-```http
-POST /api/v1/auth/login
-```
+### `POST /api/v1/auth/login`
 
-Request:
+Authentication: none.
+
+Request body:
 
 ```json
-{
-  "email": "john@example.com",
-  "password": "SecurePassword123"
-}
+{ "email": "employee@example.com", "password": "secret123" }
 ```
 
 Response `200`:
@@ -134,52 +205,52 @@ Response `200`:
   "message": "Login successful",
   "accessToken": "jwt-access-token",
   "user": {
-    "id": "user-uuid",
-    "email": "john@example.com",
+    "id": "550e8400-e29b-41d4-a716-446655440004",
+    "email": "employee@example.com",
     "userType": "employee",
-    "mustChangePassword": false
+    "roles": ["admin"],
+    "mustChangePassword": true
   }
 }
 ```
 
-The refresh token is sent as an HTTP-only cookie.
+Also sets the HTTP-only `refreshToken` cookie. Invalid credentials, inactive users, and users without a password return `401`.
 
-### Refresh an access token
+### `POST /api/v1/auth/refresh`
 
-```http
-POST /api/v1/auth/refresh
-```
-
-No bearer access token is required. The client must send the HTTP-only `refreshToken` cookie created during login. The endpoint verifies the cookie against the signed refresh JWT and the active database session, then returns a new 15-minute access token.
-
-Expired refresh-token database rows are cleaned up opportunistically when login or token refresh is requested. Active and unexpired sessions are not deleted.
+Authentication: refresh-token cookie. No body.
 
 Response `200`:
 
 ```json
-{
-  "accessToken": "new-jwt-access-token"
-}
+{ "accessToken": "jwt-access-token" }
 ```
 
-If the cookie is missing, expired, revoked, invalid, or belongs to an inactive user, the response is `401`.
-
-### Accept a customer invitation
-
-```http
-POST /api/v1/auth/invitation/accept
-```
-
-Used by a customer created by CS to set a permanent password. Invitation tokens are one-time-use and expire after 24 hours.
-
-Request:
+Possible `401` responses:
 
 ```json
-{
-  "token": "64-character-invitation-token",
-  "password": "CustomerPassword123"
-}
+{ "error": "Refresh token missing" }
 ```
+
+```json
+{ "error": "Refresh token is invalid, expired, or revoked" }
+```
+
+```json
+{ "error": "User account is inactive or unavailable" }
+```
+
+### `POST /api/v1/auth/invitation/accept`
+
+Authentication: none.
+
+Request body:
+
+```json
+{ "token": "64-character-hex-token", "password": "newpassword123" }
+```
+
+`token` must be exactly 64 characters and `password` must be at least 8 characters.
 
 Response `200`:
 
@@ -187,181 +258,194 @@ Response `200`:
 {
   "message": "Account password set successfully. You can now log in.",
   "user": {
-    "id": "customer-uuid",
-    "email": "sarah@example.com"
+    "id": "550e8400-e29b-41d4-a716-446655440004",
+    "email": "employee@example.com"
   }
 }
 ```
 
-## Customer APIs
+Invalid, expired, or already-used invitations return `400`.
 
-### List configured device categories
+### `GET /api/v1/auth/me`
 
-```http
-GET /api/v1/jobs/device-categories
+Authentication: Bearer token.
+
+Response `200`:
+
+```json
+{
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440004",
+    "email": "employee@example.com",
+    "userType": "employee",
+    "mustChangePassword": false,
+    "roles": ["admin"]
+  }
+}
 ```
 
-Roles: `customer`, `customer_service`, `admin`
+## Roles
 
-Returns the device categories configured in `device_service_charges`. The customer and CS forms should use this response rather than accepting arbitrary category text.
+### `GET /api/v1/roles/`
+
+Authentication: Bearer token. Role: `admin`.
+
+Response `200`:
+
+```json
+{
+  "roles": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "name": "admin",
+      "description": "System administrator"
+    }
+  ]
+}
+```
+
+## Jobs
+
+### `GET /api/v1/jobs/device-categories`
+
+Authentication: Bearer token. Roles: `admin`, `customer_service`, `customer`.
 
 Response `200`:
 
 ```json
 {
   "categories": [
-    {
-      "value": "laptop",
-      "serviceCharge": "1500.00"
-    }
+    { "value": "Laptop", "serviceCharge": "500.00" }
   ]
 }
 ```
 
-### Create a self-service repair request
+### `POST /api/v1/jobs/`
 
-```http
-POST /api/v1/customer/jobs
-```
+Authentication: Bearer token. Roles: `admin`, `customer_service`.
 
-Role: `customer`
-
-Creates a job on behalf of the logged-in customer. The customer ID comes from the access token and cannot be supplied in the request.
-
-Initial status:
-
-```text
-pending_cs_verification
-```
-
-Request:
+Request body:
 
 ```json
 {
-  "deviceCategory": "laptop",
-  "issueDescription": "Laptop screen is not working"
+  "customerEmail": "customer@example.com",
+  "customerPhone": "+919876543210",
+  "customerFirstName": "Ravi",
+  "customerLastName": "Kumar",
+  "billingAddress": "Bengaluru",
+  "deviceCategory": "Laptop",
+  "deviceSerialNumber": "SN12345",
+  "issueDescription": "Laptop does not power on",
+  "estimatedComponentsCost": 2500,
+  "comment": "Customer reports sudden shutdown"
 }
 ```
 
-Response `201`:
-
-```json
-{
-  "message": "Repair request submitted successfully. It is awaiting CS verification.",
-  "job": {
-    "id": "job-uuid",
-    "jobNumber": "JOB-UUID-DERIVED-NUMBER",
-    "customerId": "customer-uuid",
-    "deviceCategory": "laptop",
-    "issueDescription": "Laptop screen is not working",
-    "currentStatus": "pending_cs_verification"
-  }
-}
-```
-
-### Approve or reject a final quote
-
-```http
-PATCH /api/v1/customer/quote-response
-```
-
-Roles: `customer`, `customer_service`, `admin`
-
-Customers can respond only to their own jobs.
-
-Request:
-
-```json
-{
-  "jobId": "job-uuid",
-  "decision": "accept"
-}
-```
-
-`decision` must be `accept` or `reject`.
-
-Response `200`:
-
-```json
-{
-  "message": "Quote accepted successfully.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "repair_in_progress"
-  }
-}
-```
-
-Rejecting a quote changes the status to `repair_rejected`.
-
-## Customer Service APIs
-
-### Create a job for a customer
-
-```http
-POST /api/v1/jobs
-```
-
-Roles: `customer_service`, `admin`
-
-Used when CS creates a job from a phone call or walk-in. If the customer does not exist, an account, profile, invitation, and job are created together in one transaction.
-
-Required customer information includes phone and address.
-
-Request:
-
-```json
-{
-  "customerEmail": "sarah@example.com",
-  "customerPhone": "9876543210",
-  "customerFirstName": "Sarah",
-  "customerLastName": "Smith",
-  "billingAddress": "12 MG Road, Mumbai",
-  "deviceCategory": "laptop",
-  "issueDescription": "Laptop is not powering on",
-  "estimatedComponentsCost": 1000
-}
-```
-
-Initial status:
-
-```text
-ready_for_pickup
-```
+Required strings: `customerEmail`, `customerPhone`, `customerFirstName`, `customerLastName`, `billingAddress`, `deviceCategory`, `issueDescription`, `comment`. `deviceSerialNumber` is optional. `issueDescription` must have at least 5 characters, `comment` must be 1-2000 characters, and `estimatedComponentsCost` must be a nonnegative number.
 
 Response `201`:
 
 ```json
 {
   "message": "Job created successfully by Customer Service",
-  "job": {
-    "id": "job-uuid",
-    "jobNumber": "JOB-UUID-DERIVED-NUMBER",
-    "customerId": "customer-uuid",
-    "currentStatus": "ready_for_pickup"
-  },
-  "invitationToken": "present-only-for-a-new-customer"
+  "job": "<full jobs row>",
+  "item": "<full job_items row>",
+  "invitationToken": "hex-token-when-new-customer"
 }
 ```
 
-The invitation token should be delivered through a secure email or SMS channel. Do not log it or expose it to unauthorized users.
+`invitationToken` is omitted when the customer already exists. Invalid device categories return `400`.
 
-### Verify a self-service job
+## Customer
 
-```http
-PATCH /api/v1/cs/approve-job
+### `POST /api/v1/customer/jobs`
+
+Authentication: Bearer token. Role: `customer`.
+
+Request body:
+
+```json
+{
+  "deviceCategory": "Laptop",
+  "issueDescription": "Screen is flickering",
+  "comment": "Please call before visiting"
+}
 ```
 
-Roles: `customer_service`, `admin`
+Required: `deviceCategory`, `issueDescription`. Optional: `comment`. The issue description must have at least 5 characters and the comment may be up to 2000 characters.
 
-Moves a customer-created job from `pending_cs_verification` to `ready_for_pickup`.
+Response `201`:
+
+```json
+{
+  "message": "Repair request submitted successfully. It is awaiting CS verification.",
+  "job": "<full jobs row>",
+  "jobItem": "<full job_items row>"
+}
+```
+
+### `PATCH /api/v1/customer/quote-response`
+
+Authentication: Bearer token. Roles: `admin`, `customer_service`, `customer`.
+
+Request body:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "decision": "accept",
+  "comment": "Approved"
+}
+```
+
+`jobItemId` and `decision` are required. `decision` is `accept` or `reject`; `comment` is optional and limited to 2000 characters.
+
+Response `200`:
+
+```json
+{
+  "message": "Quote accepted successfully.",
+  "jobItem": "<full job_items row>"
+}
+```
+
+For `decision: "reject"`, the message is `Quote rejected successfully.`. Ownership violations return `403`; missing records return `404`; invalid workflow status returns `400`.
+
+## Customer Service
+
+All endpoints in this section require a Bearer token and one of these roles: `admin`, `customer_service`.
+
+### `PATCH /api/v1/cs/approve-item`
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "estimatedComponentsCost": 1000
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "estimatedComponentsCost": 2500,
+  "comment": "Verified repair request"
+}
+```
+
+`jobItemId` and `comment` are required. `estimatedComponentsCost` is optional and nonnegative.
+
+Response `200`:
+
+```json
+{
+  "message": "Job item verified successfully and approved for transport.",
+  "jobItem": "<full job_items row>"
+}
+```
+
+### `PATCH /api/v1/cs/reject-item`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Repair request cannot be accepted"
 }
 ```
 
@@ -369,86 +453,182 @@ Response `200`:
 
 ```json
 {
-  "message": "Job successfully verified and approved by CS. Moved to ready for pickup.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "ready_for_pickup"
-  }
+  "message": "Job item rejected successfully.",
+  "jobItem": "<full job_items row>"
 }
 ```
 
-### List jobs waiting for final quotes
-
-```http
-GET /api/v1/cs/pending-quotes
-```
-
-Roles: `customer_service`, `admin`
-
-Response `200`:
-
-```json
-{
-  "count": 1,
-  "jobs": [
-    {
-      "id": "job-uuid",
-      "currentStatus": "pending_final_quote",
-      "requestedComponents": "LCD screen"
-    }
-  ]
-}
-```
-
-### Generate a final quote
-
-```http
-PATCH /api/v1/cs/final-quote
-```
-
-Roles: `customer_service`, `admin`
-
-The configured service charge for the device category is automatically added to the quote.
+### `PATCH /api/v1/cs/final-quote`
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "finalComponentsCost": 5000
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "finalComponentsCost": 3500,
+  "comment": "Final quote prepared"
 }
 ```
+
+All fields are required; `finalComponentsCost` must be nonnegative.
 
 Response `200`:
 
 ```json
 {
   "message": "Final quote generated successfully. Awaiting customer approval.",
-  "job": {
-    "id": "job-uuid",
-    "finalComponentsCost": "5000",
-    "serviceChargeApplied": "1500",
-    "currentStatus": "awaiting_customer_approval"
+  "jobItem": "<full job_items row>",
+  "quote": {
+    "version": 1,
+    "componentsCost": 3500,
+    "serviceCharge": 500,
+    "totalAmount": 4000
   }
 }
 ```
 
-### Close a job
+### `GET /api/v1/cs/pending-quotes`
 
-```http
-PATCH /api/v1/cs/close
+Response `200`:
+
+```json
+{
+  "count": 1,
+  "jobs": [
+    { "job": "<full jobs row>", "jobItem": "<full job_items row>" }
+  ]
+}
 ```
 
-Roles: `customer_service`, `admin`
+### `GET /api/v1/cs/pending-approval`
 
-Closes a completed or rejected/cancelled job after CS verification.
+Response `200`:
+
+```json
+{
+  "count": 1,
+  "jobs": [
+    { "job": "<full jobs row>", "jobItem": "<full job_items row>" }
+  ]
+}
+```
+
+### `GET /api/v1/cs/pending-onsite-confirmation`
+
+Response `200`:
+
+```json
+{
+  "count": 1,
+  "items": [
+    { "job": "<full jobs row>", "jobItem": "<full job_items row>" }
+  ]
+}
+```
+
+### `PATCH /api/v1/cs/confirm-onsite-repair`
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "closingRemarks": "Repair verified with customer."
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "customerConfirmed": true,
+  "comment": "Customer confirmed completion"
+}
+```
+
+`customerConfirmed` must literally be `true`.
+
+Response `200`:
+
+```json
+{
+  "message": "Onsite repair has been confirmed with the customer.",
+  "item": "<full job_items row>"
+}
+```
+
+### `GET /api/v1/cs/ready-for-closure`
+
+Response `200`:
+
+```json
+{
+  "count": 1,
+  "jobs": [
+    { "job": "<full jobs row>", "items": ["<full job_items rows>"] }
+  ]
+}
+```
+
+### `PATCH /api/v1/cs/close`
+
+Request:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "customerConfirmed": true,
+  "paymentConfirmed": true,
+  "closingRemarks": "All items delivered and payment received"
+}
+```
+
+All fields are required. Both confirmation fields must literally be `true`; remarks are limited to 2000 characters.
+
+Response `200`:
+
+```json
+{
+  "message": "Job successfully closed.",
+  "job": "<full jobs row>"
+}
+```
+
+## Transport manager
+
+All endpoints in this section require a Bearer token and one of these roles: `admin`, `transport_manager`.
+
+### `GET /api/v1/transport/pending`
+
+Response `200`:
+
+```json
+{ "count": 1, "jobs": ["<full jobs row>"] }
+```
+
+### `PATCH /api/v1/transport/assign`
+
+Request:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "transportPersonId": "550e8400-e29b-41d4-a716-446655440005",
+  "comment": "Assigned for pickup"
+}
+```
+
+All fields are required; both IDs must be UUIDs and `comment` must be 1-2000 characters.
+
+Response `200`:
+
+```json
+{
+  "message": "Job successfully assigned to the transport team person.",
+  "job": "<full jobs row>"
+}
+```
+
+### `PATCH /api/v1/transport/receive-lab`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Item received at lab"
 }
 ```
 
@@ -456,375 +636,464 @@ Response `200`:
 
 ```json
 {
-  "message": "Job successfully closed.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "closed"
-  }
+  "message": "Item successfully received at the lab.",
+  "item": "<full job_items row>"
 }
 ```
 
-## Transport Manager APIs
+### `GET /api/v1/transport/pending-deliveries`
 
-All transport endpoints require roles `transport_manager` or `admin`.
-
-### List jobs ready for pickup
-
-```http
-GET /api/v1/transport/pending
-```
-
-Response:
+Response `200`:
 
 ```json
-{
-  "jobs": [
-    {
-      "id": "job-uuid",
-      "currentStatus": "ready_for_pickup"
-    }
-  ]
-}
+{ "count": 1, "jobs": ["<full jobs row>"] }
 ```
 
-### Assign a pickup technician
-
-```http
-PATCH /api/v1/transport/assign
-```
-
-The technician must be an active employee with the `repair_person` role.
+### `PATCH /api/v1/transport/assign-delivery`
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "technicianId": "field-technician-uuid"
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "deliveryPersonId": "550e8400-e29b-41d4-a716-446655440006",
+  "comment": "Assigned for delivery"
 }
 ```
 
-Response:
+Response `200`:
 
 ```json
 {
-  "message": "Technician assigned successfully. Job is pending pickup.",
-  "job": {
-    "id": "job-uuid",
-    "assignedPickupTechId": "field-technician-uuid",
-    "currentStatus": "pending_pickup"
-  }
+  "message": "Delivery person assigned successfully. Job is now out for delivery.",
+  "job": "<full jobs row>"
 }
 ```
 
-### Receive a device at the lab
+## Technician / transport person
 
-```http
-PATCH /api/v1/transport/receive-lab
+Most endpoints require roles `admin`, `transport_team_person`. Delivery endpoints also allow `repair_person`.
+
+### `GET /api/v1/technician/assigned-jobs`
+
+Response `200`:
+
+```json
+{ "jobs": ["<full jobs row>"] }
 ```
+
+### `PATCH /api/v1/technician/start`
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid"
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "comment": "Starting customer visit"
 }
 ```
 
-Response:
+Response `200`:
+
+```json
+{ "message": "Customer visit has been started.", "job": "<full jobs row>" }
+```
+
+### `GET /api/v1/technician/:jobId/items`
+
+Path parameter: `jobId`. No UUID validator is attached to this route.
+
+Example: `GET /api/v1/technician/550e8400-e29b-41d4-a716-446655440000/items`
+
+Response `200`:
 
 ```json
 {
-  "message": "Device successfully received at the lab. Handover to repair team ready.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "arrived_at_lab"
-  }
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "items": ["<full job_items rows>"]
 }
 ```
 
-### List completed lab jobs awaiting delivery
+### `PATCH /api/v1/technician/inspect-item`
 
-```http
-GET /api/v1/transport/pending-deliveries
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Inspecting item at customer site"
+}
 ```
 
-Only jobs with `repairLocation: "lab"` are returned.
+Response `200`:
 
-Response:
+```json
+{ "message": "Item inspection has started.", "item": "<full job_items row>" }
+```
+
+### `PATCH /api/v1/technician/send-item-to-lab`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Sending item to lab"
+}
+```
+
+Response `200`:
+
+```json
+{ "message": "Item has been sent to the lab.", "item": "<full job_items row>" }
+```
+
+### `PATCH /api/v1/technician/request-final-quote`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "requestedComponents": "Replace motherboard",
+  "additionalNotes": "Customer-site repair",
+  "comment": "Quote required"
+}
+```
+
+Required: `jobItemId`, `comment`. Optional: `requestedComponents`, `additionalNotes`, each up to 2000 characters.
+
+Response `200`:
+
+```json
+{
+  "message": "Final quote requested. CS team will prepare the customer quote.",
+  "item": "<full job_items row>"
+}
+```
+
+### `PATCH /api/v1/technician/reject-item`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Item cannot be repaired"
+}
+```
+
+Response `200`:
+
+```json
+{ "message": "Item has been rejected.", "item": "<full job_items row>" }
+```
+
+### `PATCH /api/v1/technician/start-repair`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Starting onsite repair"
+}
+```
+
+Response `200`:
+
+```json
+{ "message": "Onsite repair has started.", "item": "<full job_items row>" }
+```
+
+### `PATCH /api/v1/technician/complete-repair`
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Onsite repair completed"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "message": "Onsite repair completed. CS team has been notified for customer confirmation.",
+  "item": "<full job_items row>"
+}
+```
+
+### `GET /api/v1/technician/delivery-jobs`
+
+Roles: `admin`, `transport_team_person`, `repair_person`.
+
+Response `200`:
+
+```json
+{ "jobs": ["<full jobs row>"] }
+```
+
+### `PATCH /api/v1/technician/start-delivery`
+
+Roles: `admin`, `transport_team_person`, `repair_person`.
+
+Request:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "comment": "Starting delivery"
+}
+```
+
+Response `200`:
+
+```json
+{ "message": "Delivery has started.", "job": "<full jobs row>" }
+```
+
+### `PATCH /api/v1/technician/deliver-item`
+
+Roles: `admin`, `transport_team_person`, `repair_person`.
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Item delivered to customer"
+}
+```
+
+Response `200`:
+
+```json
+{ "message": "Item has been marked as delivered.", "item": "<full job_items row>" }
+```
+
+## Repair
+
+### `GET /api/v1/repair/pending-assignment`
+
+Authentication: Bearer token. Roles: `admin`, `repair_manager`.
+
+Response `200`:
 
 ```json
 {
   "count": 1,
-  "jobs": [
-    {
-      "id": "job-uuid",
-      "repairLocation": "lab",
-      "currentStatus": "repair_completed"
-    }
+  "items": [
+    { "item": "<full job_items row>", "job": "<full jobs row>" }
   ]
 }
 ```
 
-### Assign a delivery technician
+### `PATCH /api/v1/repair/assign`
 
-```http
-PATCH /api/v1/transport/assign-delivery
-```
-
-The delivery technician may be different from the pickup or repair technician. The assignment is stored in `assignedDeliveryTechId`.
+Authentication: Bearer token. Roles: `admin`, `repair_manager`.
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "technicianId": "delivery-technician-uuid"
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "repairPersonId": "550e8400-e29b-41d4-a716-446655440007",
+  "comment": "Assigned for diagnosis"
 }
 ```
 
-Response:
+Response `200`:
 
 ```json
-{
-  "message": "Technician assigned for return delivery.",
-  "job": {
-    "id": "job-uuid",
-    "assignedDeliveryTechId": "delivery-technician-uuid",
-    "currentStatus": "out_for_delivery"
-  }
-}
+{ "message": "Repair item assigned successfully.", "item": "<full job_items row>" }
 ```
 
-## Field Technician APIs
+### `GET /api/v1/repair/pending-inspection`
 
-All technician endpoints require authentication. The route permissions allow `admin` and the configured technician roles; the technician must also be assigned to the job.
+Authentication: Bearer token. Roles: `admin`, `repair_manager`.
 
-### Send a device to the lab
-
-```http
-PATCH /api/v1/technician/transit
-```
-
-Used when the field technician cannot repair the device at the customer location.
-
-Request:
-
-```json
-{
-  "jobId": "job-uuid"
-}
-```
-
-Response:
-
-```json
-{
-  "message": "Job is now in transit to the lab.",
-  "job": {
-    "id": "job-uuid",
-    "repairLocation": "lab",
-    "currentStatus": "in_transit_to_lab"
-  }
-}
-```
-
-### Request an on-site repair quote
-
-```http
-PATCH /api/v1/technician/request-quote
-```
-
-Used when the field technician can repair the device at the customer site but needs parts.
-
-Request:
-
-```json
-{
-  "jobId": "job-uuid",
-  "requestedComponents": "LCD screen",
-  "additionalNotes": "Screen replacement required."
-}
-```
-
-Response:
-
-```json
-{
-  "message": "Final quote requested successfully. CS team has been notified.",
-  "job": {
-    "id": "job-uuid",
-    "repairLocation": "customer_site",
-    "currentStatus": "pending_final_quote"
-  }
-}
-```
-
-### Confirm return delivery
-
-```http
-PATCH /api/v1/technician/deliver
-```
-
-The assigned delivery technician confirms that the device reached the customer.
-
-Request:
-
-```json
-{
-  "jobId": "job-uuid",
-  "deliveryNotes": "Delivered to Sarah after ID verification."
-}
-```
-
-Response:
-
-```json
-{
-  "message": "Device successfully delivered to the customer.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "delivered"
-  }
-}
-```
-
-## Repair Manager and Repair Technician APIs
-
-### List devices waiting for lab assignment
-
-```http
-GET /api/v1/repair/pending
-```
-
-Roles: `repair_manager`, `admin`
-
-Response:
+Response `200`:
 
 ```json
 {
   "count": 1,
-  "jobs": [
-    {
-      "id": "job-uuid",
-      "currentStatus": "arrived_at_lab"
-    }
+  "items": [
+    { "item": "<full job_items row>", "job": "<full jobs row>" }
   ]
 }
 ```
 
-### Assign a lab technician
+### `PATCH /api/v1/repair/approve`
 
-```http
-PATCH /api/v1/repair/assign
-```
-
-Roles: `repair_manager`, `admin`
-
-The target must be an active employee with the `repair_person` role.
+Authentication: Bearer token. Roles: `admin`, `repair_manager`.
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "labTechId": "lab-technician-uuid"
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Repair approved after inspection"
 }
 ```
 
-Response:
+Response `200`:
 
 ```json
-{
-  "message": "Lab Technician assigned. Job is now in lab diagnosis.",
-  "job": {
-    "id": "job-uuid",
-    "assignedRepairTechId": "lab-technician-uuid",
-    "repairLocation": "lab",
-    "currentStatus": "in_lab_diagnosis"
-  }
-}
+{ "message": "Repair approved by Repair Team Manager.", "item": "<full job_items row>" }
 ```
 
-### Request a lab repair quote
+### `PATCH /api/v1/repair/reject-inspection`
 
-```http
-PATCH /api/v1/repair/request-quote
-```
-
-Roles: `repair_person`, `admin`
+Authentication: Bearer token. Roles: `admin`, `repair_manager`.
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "requestedComponents": "LCD screen and motherboard",
-  "technicianNotes": "Motherboard damage found during diagnosis."
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Repair requires more work"
 }
 ```
 
-Response:
+Response `200`:
 
 ```json
 {
-  "message": "Lab diagnosis complete. CS team notified for final quoting.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "pending_final_quote"
-  }
+  "message": "Repair rejected during inspection. Item returned to Repair Person.",
+  "item": "<full job_items row>"
 }
 ```
 
-### Mark repair completed
+### `GET /api/v1/repair/my-items`
 
-```http
-PATCH /api/v1/repair/complete
+Authentication: Bearer token. Roles: `admin`, `repair_person`.
+
+Response `200`:
+
+```json
+{
+  "count": 1,
+  "items": [
+    { "item": "<full job_items row>", "job": "<full jobs row>" }
+  ]
+}
 ```
 
-Roles: `repair_person`, `admin`
+### `PATCH /api/v1/repair/start-diagnosis`
 
-The assigned field technician can complete an on-site repair. The assigned lab technician can complete a lab repair.
+Authentication: Bearer token. Roles: `admin`, `repair_person`.
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "repairNotes": "LCD replaced and device tested successfully."
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Diagnosis started"
 }
 ```
 
-Response:
+Response `200`:
 
 ```json
-{
-  "message": "Repair marked as completed successfully.",
-  "job": {
-    "id": "job-uuid",
-    "currentStatus": "repair_completed"
-  }
-}
+{ "message": "Diagnosis started successfully.", "item": "<full job_items row>" }
 ```
 
-## Comments and audit notes
+### `PATCH /api/v1/repair/request-final-quote`
 
-### Add a job comment
-
-```http
-POST /api/v1/comments
-```
-
-Roles: `admin`, `customer_service`, `transport_manager`, `repair_manager`, `repair_person`
-
-Adds a timestamped note to the job audit trail.
+Authentication: Bearer token. Roles: `admin`, `repair_person`.
 
 Request:
 
 ```json
 {
-  "jobId": "job-uuid",
-  "comment": "Customer was not home. Waited 10 minutes."
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "requestedComponents": "Cooling fan",
+  "diagnosisNotes": "Fan bearing is damaged",
+  "comment": "Diagnosis completed"
+}
+```
+
+Required: `jobItemId`, `comment`. Optional: `requestedComponents`, `diagnosisNotes`, each up to 2000 characters.
+
+Response `200`:
+
+```json
+{
+  "message": "Diagnosis completed. Item sent to Customer Service for final quotation.",
+  "item": "<full job_items row>"
+}
+```
+
+### `PATCH /api/v1/repair/start-repair`
+
+Authentication: Bearer token. Roles: `admin`, `repair_person`.
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Starting authorized repair"
+}
+```
+
+Response `200`:
+
+```json
+{ "message": "Repair started successfully.", "item": "<full job_items row>" }
+```
+
+### `PATCH /api/v1/repair/complete-repair`
+
+Authentication: Bearer token. Roles: `admin`, `repair_person`.
+
+Request:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "repairNotes": "Replaced the cooling fan",
+  "comment": "Repair completed"
+}
+```
+
+`repairNotes` is optional and limited to 2000 characters.
+
+Response `200`:
+
+```json
+{
+  "message": "Repair completed and sent for Repair Manager inspection.",
+  "item": "<full job_items row>"
+}
+```
+
+## Comments
+
+### `POST /api/v1/comments/`
+
+Authentication: Bearer token. Roles: `admin`, `customer_service`, `transport_manager`, `transport_team_person`, `repair_manager`, `repair_person`.
+
+Exactly one of `jobId` or `jobItemId` is required. `comment` is required and limited to 2000 characters.
+
+Request for a job comment:
+
+```json
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "comment": "Customer contacted successfully"
+}
+```
+
+Request for an item comment:
+
+```json
+{
+  "jobItemId": "550e8400-e29b-41d4-a716-446655440002",
+  "comment": "Item inspection completed"
 }
 ```
 
@@ -834,242 +1103,21 @@ Response `201`:
 {
   "message": "Comment added successfully",
   "comment": {
-    "id": "comment-uuid",
-    "jobId": "job-uuid",
-    "userId": "employee-uuid",
-    "comment": "Customer was not home. Waited 10 minutes.",
-    "createdAt": "2026-09-03T12:00:00.000Z"
+    "id": "550e8400-e29b-41d4-a716-446655440008",
+    "jobId": "550e8400-e29b-41d4-a716-446655440000",
+    "jobItemId": null,
+    "userId": "550e8400-e29b-41d4-a716-446655440004",
+    "comment": "Customer contacted successfully",
+    "createdAt": "2026-09-05T10:30:00.000Z"
   }
 }
 ```
 
-## Health check
+A missing target returns `404`; providing both `jobId` and `jobItemId` returns validation `400`.
 
-```http
-GET /api/health
-```
+## Workflow notes
 
-Response:
-
-```json
-{
-  "status": "OK",
-  "message": "API is running smoothly!"
-}
-```
-
-## Job status lifecycle
-
-```text
-Customer self-service:
-pending_cs_verification
-  -> ready_for_pickup
-
-CS-created:
-ready_for_pickup
-
-Dispatch:
-ready_for_pickup
-  -> pending_pickup
-
-On-site path:
-pending_pickup
-  -> pending_final_quote
-  -> awaiting_customer_approval
-  -> repair_in_progress
-  -> repair_completed
-  -> closed
-
-Lab path:
-pending_pickup
-  -> in_transit_to_lab
-  -> arrived_at_lab
-  -> in_lab_diagnosis
-  -> pending_final_quote
-  -> awaiting_customer_approval
-  -> repair_in_progress
-  -> repair_completed
-  -> out_for_delivery
-  -> delivered
-  -> closed
-```
-
-Status updates are validated and recorded in job status history inside database transactions.
-
-## Database tables
-
-The PostgreSQL database contains the following application tables. UUID values are used for primary and foreign keys; sensitive credentials and invitation values are stored as hashes.
-
-### `users`
-
-Stores the base login and account record for every employee and customer.
-
-Key data:
-
-- `id`: UUID primary key
-- `email`: Unique login email
-- `passwordHash`: Hashed password; the raw password is never stored
-- `userType`: `employee` or `customer`
-- `phone`: Account phone number
-- `isActive`: Whether login and account use are enabled
-- `mustChangePassword`: Whether the user must set a new password
-- `createdAt`, `updatedAt`: Account timestamps
-
-### `employee_profiles`
-
-Stores employee identity, compliance, payroll, emergency-contact, address, and specialization data. It is linked one-to-one with `users` through `userId`.
-
-Key data:
-
-- Name and phone
-- Date of birth
-- Aadhaar, PAN, and UAN details
-- Current and permanent addresses
-- Bank account, IFSC, and bank name
-- Emergency contact
-- `specializations`: JSON list of work specializations
-
-### `customer_profiles`
-
-Stores customer CRM information separately from login credentials.
-
-Key data:
-
-- `userId`: Linked customer account
-- First and last name
-- Phone number
-- Billing/service address
-
-### `roles`
-
-Stores the system roles available for authorization.
-
-Key data:
-
-- `id`: UUID primary key
-- `name`: Unique role name such as `customer_service`, `repair_person`, or `transport_manager`
-- `description`: Role description
-- `permissions`: Optional JSON permission data
-
-### `user_roles`
-
-Junction table assigning one or more roles to a user.
-
-Key data:
-
-- `userId`: User receiving the role
-- `roleId`: Assigned role
-- `assignedBy`: Employee who assigned the role
-- `createdAt`: Assignment timestamp
-
-### `teams`
-
-Stores organizational teams such as Repair or Transport and their manager.
-
-Key data:
-
-- `id`: UUID primary key
-- `name`: Unique team name
-- `managerId`: User responsible for the team
-- `createdAt`: Team creation timestamp
-
-### `refresh_tokens`
-
-Stores active login sessions securely.
-
-Key data:
-
-- `userId`: Token owner
-- `tokenHash`: Hash of the refresh token; raw token is kept only in the HTTP-only cookie
-- `expiresAt`: Session expiration
-- `isRevoked`: Whether the session has been invalidated
-- `createdAt`: Token creation timestamp
-
-### `account_invitations`
-
-Stores one-time invitations for customer accounts created by CS.
-
-Key data:
-
-- `userId`: Customer receiving the invitation
-- `tokenHash`: Hash of the invitation token
-- `expiresAt`: Invitation expiration, currently 24 hours
-- `usedAt`: Set when the customer accepts the invitation
-- `createdAt`: Invitation creation timestamp
-
-The raw invitation token is not stored in the database.
-
-### `device_service_charges`
-
-Stores the hidden service charge configured for each device category.
-
-Key data:
-
-- `deviceCategory`: Unique category such as `laptop`
-- `chargeAmount`: Service charge automatically added to final quotes
-- `createdAt`: Configuration creation timestamp
-
-### `jobs`
-
-Stores the main repair-service order and its current workflow state.
-
-Key data:
-
-- `id`: Internal UUID primary key
-- `jobNumber`: Unique human-readable job identifier
-- `customerId`: Customer who owns the repair
-- `deviceCategory`: Device type
-- `issueDescription`: Customer-reported problem
-- `currentStatus`: Controlled workflow status
-- `repairLocation`: `customer_site` or `lab`
-- Component estimates and final quote amounts
-- Applied service charge
-- Final quote approval flag
-- Transport, repair, pickup, and delivery assignments
-- Requested components and technician notes
-- `createdAt`, `updatedAt`: Job timestamps
-
-### `job_comments`
-
-Stores timestamped notes added by internal employees during the job lifecycle.
-
-Key data:
-
-- `jobId`: Related repair job
-- `userId`: Employee who wrote the note
-- `comment`: Note text
-- `createdAt`: Comment timestamp
-
-Examples include pickup issues, customer communication, repair notes, and delivery notes.
-
-### `job_status_history`
-
-Stores the complete audit trail of job status changes.
-
-Key data:
-
-- `jobId`: Related repair job
-- `previousStatus`: Status before the change
-- `newStatus`: Status after the change
-- `changedBy`: User who caused the transition
-- `note`: Optional transition explanation
-- `createdAt`: Transition timestamp
-
-Status updates and their corresponding history records are written in the same database transaction.
-
-## Database relationships
-
-```text
-users
-  ├── employee_profiles
-  ├── customer_profiles
-  ├── user_roles ── roles
-  ├── refresh_tokens
-  ├── account_invitations
-  └── jobs
-        ├── job_comments
-        └── job_status_history
-
-jobs.deviceCategory ── device_service_charges.deviceCategory
-teams.managerId ── users.id
-```
+- UUID examples use the standard UUID format; replace them with IDs from your database.
+- Monetary request fields are JSON numbers. Monetary values in database rows may be returned as decimal strings.
+- Workflow endpoints enforce current item/job status and assignment ownership in their controllers. A valid request body can still return `400` or `403` when the workflow state or user assignment is wrong.
+- No warranty endpoints are currently registered even though warranty schema/controller files exist.

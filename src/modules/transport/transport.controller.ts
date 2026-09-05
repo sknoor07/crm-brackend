@@ -1,175 +1,1011 @@
 import { Request, Response } from 'express';
-import { and, eq, desc, inArray } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+} from 'drizzle-orm';
+
 import { db } from '../../config/database.js';
-import { jobs, roles, userRoles, users } from '../../db/schema/index.js';
-import { AssignTechnicianInput } from './transport.validation.js';
-import { updateJobWithStatusTransition } from '../jobs/status-history.js';
 
-import { ReceiveLabInput } from './transport.validation.js';
+import {
+  jobs,
+  jobItems,
+  jobComments,
+  jobItemStatusHistory,
+  roles,
+  userRoles,
+  users,
+  employeeProfiles,
+} from '../../db/schema/index.js';
 
-const isActiveRepairPerson = async (userId: string) => {
-  const [technician] = await db
-    .select({ id: users.id })
+import type {
+  AssignTransportPersonInput,
+  ReceiveLabInput,
+  AssignDeliveryInput,
+  AssignRepairManagerInput,
+} from './transport.validation.js';
+
+import type {
+  JobItemStatus,
+} from '../../db/schema/job-status.js';
+
+
+/* =========================================================
+   HELPERS
+   ========================================================= */
+
+
+/**
+ * Check whether an employee is active and has
+ * the transport_team_person role.
+ *
+ * A transport person may also have repair_person,
+ * but they must have transport_team_person for
+ * transport-team operations.
+ */
+const isActiveTransportPerson = async (
+  userId: string,
+) => {
+  const [employee] = await db
+    .select({
+      id: users.id,
+    })
     .from(users)
-    .innerJoin(userRoles, eq(userRoles.userId, users.id))
-    .innerJoin(roles, eq(userRoles.roleId, roles.id))
-    .where(and(
-      eq(users.id, userId),
-      eq(users.userType, 'employee'),
-      eq(users.isActive, true),
-      inArray(roles.name, ['repair_person', 'pickup_person'])  
-    ))
+    .innerJoin(
+      userRoles,
+      eq(userRoles.userId, users.id),
+    )
+    .innerJoin(
+      roles,
+      eq(userRoles.roleId, roles.id),
+    )
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.userType, 'employee'),
+        eq(users.isActive, true),
+        inArray(roles.name, [
+          'transport_team_person',
+        ]),
+      ),
+    )
     .limit(1);
 
-  return Boolean(technician);
+  return Boolean(employee);
 };
 
-// 1. List all jobs ready for Transport Manager review
-export const getPendingPickups = async (req: Request, res: Response) => {
+
+/**
+ * Check whether an employee can perform delivery.
+ *
+ * Delivery is handled by the transport team,
+ * so transport_team_person is sufficient.
+ */
+const isActiveDeliveryPerson = async (
+  userId: string,
+) => {
+  return isActiveTransportPerson(userId);
+};
+
+
+/**
+ * Get all items belonging to a job.
+ */
+const getJobItems = async (
+  jobId: string,
+) => {
+  return db
+    .select()
+    .from(jobItems)
+    .where(eq(jobItems.jobId, jobId));
+};
+
+
+/**
+ * Record an item-level status change.
+ *
+ * This is used only by this controller for the
+ * item transitions handled by Transport Manager.
+ */
+const recordItemStatusChange = async (
+  tx: any,
+  jobItemId: string,
+  previousStatus: JobItemStatus | null,
+  newStatus: JobItemStatus,
+  changedBy: string,
+  note: string,
+) => {
+  await tx
+    .insert(jobItemStatusHistory)
+    .values({
+      jobItemId,
+      previousStatus,
+      newStatus,
+      changedBy,
+      note,
+    });
+};
+
+
+/**
+ * Add a job-level comment.
+ */
+const addJobComment = async (
+  tx: any,
+  jobId: string,
+  userId: string,
+  comment: string,
+) => {
+  await tx
+    .insert(jobComments)
+    .values({
+      jobId,
+      userId,
+      comment,
+    });
+};
+
+
+/**
+ * Add an item-level comment.
+ */
+const addItemComment = async (
+  tx: any,
+  jobItemId: string,
+  userId: string,
+  comment: string,
+) => {
+  await tx
+    .insert(jobComments)
+    .values({
+      jobItemId,
+      userId,
+      comment,
+    });
+};
+
+
+/* =========================================================
+   1. GET JOBS WAITING FOR TRANSPORT MANAGER
+   ========================================================= */
+
+/**
+ * Get jobs that contain items approved by CS
+ * and therefore waiting for transport handling.
+ *
+ * Job status remains:
+ *
+ *     in_progress
+ *
+ * Item status:
+ *
+ *     approved_for_transport
+ */
+export const getPendingPickups = async (
+  _req: Request,
+  res: Response,
+) => {
   try {
-    const pendingJobs = await db.select()
+    const pendingJobs = await db
+      .select({
+        job: jobs,
+        jobItem: jobItems,
+      })
       .from(jobs)
-      .where(eq(jobs.currentStatus, 'ready_for_pickup'))
-      .orderBy(desc(jobs.createdAt));
-
-    return res.status(200).json({ jobs: pendingJobs });
-  } catch (error) {
-    console.error('Fetch pending pickups error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-// 2. Assign the Field Technician
-export const assignTechnician = async (req: Request<{}, {}, AssignTechnicianInput>, res: Response) => {
-  try {
-    const { jobId, technicianId } = req.body;
-    const transportManagerId = req.user?.userId; 
-
-    // Find job and verify current status
-    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
-    
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.currentStatus !== 'ready_for_pickup') {
-      return res.status(400).json({ error: `Job is not ready for pickup.` });
-    }
-    if (!(await isActiveRepairPerson(technicianId))) {
-      return res.status(400).json({ error: 'Assigned technician must be an active employee with the repair_person role.' });
-    }
-
-    // Update job assignment and transition status
-    const updatedJob = await updateJobWithStatusTransition(
-      job.id, job.currentStatus, 'pending_pickup',
-      async (tx) => {
-        const [result] = await tx.update(jobs)
-          .set({ assignedPickupTechId: technicianId, transportManagerId, currentStatus: 'pending_pickup', updatedAt: new Date() })
-          .where(eq(jobs.id, jobId)).returning();
-        return result;
-      },
-      transportManagerId,
-    );
+      .innerJoin(
+        jobItems,
+        eq(jobItems.jobId, jobs.id),
+      )
+      .where(
+        and(
+          eq(
+            jobs.currentStatus,
+            'in_progress',
+          ),
+          eq(
+            jobItems.currentStatus,
+            'approved_for_transport',
+          ),
+        ),
+      )
+      .orderBy(
+        desc(jobs.createdAt),
+      );
 
     return res.status(200).json({
-      message: 'Technician assigned successfully. Job is pending pickup.',
-      job: updatedJob,
+      count: pendingJobs.length,
+      jobs: pendingJobs,
     });
   } catch (error) {
-    console.error('Assign technician error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error(
+      'Fetch pending transport jobs error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
   }
 };
 
 
-// 3. Receive the device physically at the lab
-export const receiveAtLab = async (req: Request<{}, {}, ReceiveLabInput>, res: Response) => {
-  try {
-    const { jobId } = req.body;
+/* =========================================================
+   2. ASSIGN WHOLE JOB TO TRANSPORT PERSON
+   ========================================================= */
 
-    // 1. Find the job
-    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
-    
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    
-    // 2. Ensure the job was actually in transit
-    if (job.currentStatus !== 'in_transit_to_lab') {
-      return res.status(400).json({ 
-        error: `Cannot receive device at lab. Current status is '${job.currentStatus}', expected 'in_transit_to_lab'.` 
+/**
+ * Assign the whole job to one transport person.
+ *
+ * IMPORTANT:
+ *
+ * This does NOT change jobs.currentStatus.
+ *
+ * The job remains:
+ *
+ *     in_progress
+ *
+ * The actual workflow is tracked by each job item.
+ */
+export const assignTransportPerson = async (
+  req: Request<
+    {},
+    {},
+    AssignTransportPersonInput
+  >,
+  res: Response,
+) => {
+  try {
+    const {
+      jobId,
+      transportPersonId,
+      comment,
+    } = req.body;
+
+    const transportManagerId =
+      req.user?.userId;
+
+    if (!transportManagerId) {
+      return res.status(401).json({
+        error:
+          'Authenticated user not found',
       });
     }
 
-    // 3. Update the job status
-    const updatedJob = await updateJobWithStatusTransition(
-      job.id, job.currentStatus, 'arrived_at_lab',
-      async (tx) => {
-        const [result] = await tx.update(jobs)
-          .set({ currentStatus: 'arrived_at_lab', updatedAt: new Date() })
-          .where(eq(jobs.id, jobId)).returning();
-        return result;
-      },
-      req.user?.userId,
-    );
+    /* -----------------------------------------------------
+       Find job
+       ----------------------------------------------------- */
 
-    return res.status(200).json({
-      message: 'Device successfully received at the lab. Handover to repair team ready.',
-      job: updatedJob,
-    });
-  } catch (error) {
-    console.error('Receive at lab error:', error);
-    return res.status(500).json({ error: 'Internal server error while receiving device' });
-  }
-};
-import { assignDeliverySchema } from './transport.validation.js';
-
-// 4. View jobs ready for return delivery
-export const getPendingDeliveries = async (req: Request, res: Response) => {
-  try {
-    const pendingDeliveries = await db.select()
+    const [job] = await db
+      .select()
       .from(jobs)
-      .where(and(
-        eq(jobs.currentStatus, 'repair_completed'),
-        eq(jobs.repairLocation, 'lab'),
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Job must still be active
+       ----------------------------------------------------- */
+
+    if (
+      job.currentStatus !==
+      'in_progress'
+    ) {
+      return res.status(400).json({
+        error:
+          `Job cannot be assigned in '${job.currentStatus}' status.`,
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate transport person
+       ----------------------------------------------------- */
+
+    if (
+      !(await isActiveTransportPerson(
+        transportPersonId,
       ))
-      .orderBy(desc(jobs.updatedAt));
-
-    return res.status(200).json({ count: pendingDeliveries.length, jobs: pendingDeliveries });
-  } catch (error) {
-    console.error('Fetch deliveries error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
-// 5. Assign technician for return delivery
-export const assignDelivery = async (req: Request, res: Response) => {
-  try {
-    const { jobId, technicianId } = req.body;
-    const transportManagerId = req.user?.userId;
-
-    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
-    
-    if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.currentStatus !== 'repair_completed') {
-      return res.status(400).json({ error: `Cannot assign delivery. Job is in '${job.currentStatus}' state.` });
-    }
-    if (!(await isActiveRepairPerson(technicianId))) {
-      return res.status(400).json({ error: 'Assigned technician must be an active employee with the repair_person role.' });
+    ) {
+      return res.status(400).json({
+        error:
+          'Assigned person must be an active employee with the transport_team_person role.',
+      });
     }
 
-    const updatedJob = await updateJobWithStatusTransition(
-      job.id, job.currentStatus, 'out_for_delivery',
-      async (tx) => {
-        const [result] = await tx.update(jobs)
-          .set({ assignedDeliveryTechId: technicianId, transportManagerId, currentStatus: 'out_for_delivery', updatedAt: new Date() })
-          .where(eq(jobs.id, jobId)).returning();
+    /* -----------------------------------------------------
+       Check that job has items waiting for transport
+       ----------------------------------------------------- */
+
+    const items = await getJobItems(jobId);
+
+    if (items.length === 0) {
+      return res.status(400).json({
+        error:
+          'Cannot assign transport person because the job has no items.',
+      });
+    }
+
+    const hasItemsWaitingForTransport =
+      items.some(
+        (item) =>
+          item.currentStatus ===
+          'approved_for_transport',
+      );
+
+    if (!hasItemsWaitingForTransport) {
+      return res.status(400).json({
+        error:
+          'Job has no items waiting for transport.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Assign transport person
+       ----------------------------------------------------- */
+
+    const updatedJob =
+      await db.transaction(async (tx) => {
+        const [result] = await tx
+          .update(jobs)
+          .set({
+            transportManagerId,
+            assignedTransportTeamPersonId:
+              transportPersonId,
+            updatedAt: new Date(),
+          })
+          .where(
+            eq(jobs.id, jobId),
+          )
+          .returning();
+
+        await addJobComment(
+          tx,
+          jobId,
+          transportManagerId,
+          comment,
+        );
+
         return result;
-      },
-      transportManagerId,
-    );
+      });
 
     return res.status(200).json({
-      message: 'Technician assigned for return delivery.',
+      message:
+        'Job successfully assigned to the transport team person.',
       job: updatedJob,
     });
   } catch (error) {
-    console.error('Assign delivery error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    console.error(
+      'Assign transport person error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+
+/* =========================================================
+   3. RECEIVE ITEM AT LAB
+   ========================================================= */
+
+/**
+ * Receive an item at the lab.
+ *
+ * Transition:
+ *
+ *     pending_lab_receipt
+ *              ↓
+ *     received_at_lab
+ *
+ * This is an ITEM-level transition.
+ */
+export const receiveAtLab = async (
+  req: Request<
+    {},
+    {},
+    ReceiveLabInput
+  >,
+  res: Response,
+) => {
+  try {
+    const {
+      jobItemId,
+      comment,
+    } = req.body;
+
+    const transportManagerId =
+      req.user?.userId;
+
+    if (!transportManagerId) {
+      return res.status(401).json({
+        error:
+          'Authenticated user not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Find item
+       ----------------------------------------------------- */
+
+    const [item] = await db
+      .select()
+      .from(jobItems)
+      .where(
+        eq(
+          jobItems.id,
+          jobItemId,
+        ),
+      )
+      .limit(1);
+
+    if (!item) {
+      return res.status(404).json({
+        error:
+          'Job item not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate status
+       ----------------------------------------------------- */
+
+    if (
+      item.currentStatus !==
+      'pending_lab_receipt'
+    ) {
+      return res.status(400).json({
+        error:
+          `Item cannot be received at lab from '${item.currentStatus}' status.`,
+      });
+    }
+
+    /* -----------------------------------------------------
+       Update item
+       ----------------------------------------------------- */
+
+    const updatedItem =
+      await db.transaction(async (tx) => {
+        const [result] = await tx
+          .update(jobItems)
+          .set({
+            currentStatus:
+              'received_at_lab',
+            updatedAt: new Date(),
+          })
+          .where(
+            eq(
+              jobItems.id,
+              jobItemId,
+            ),
+          )
+          .returning();
+
+        await recordItemStatusChange(
+          tx,
+          jobItemId,
+          item.currentStatus as JobItemStatus,
+          'received_at_lab',
+          transportManagerId,
+          comment,
+        );
+
+        await addItemComment(
+          tx,
+          jobItemId,
+          transportManagerId,
+          comment,
+        );
+
+        return result;
+      });
+
+    return res.status(200).json({
+      message:
+        'Item successfully received at the lab.',
+      item: updatedItem,
+    });
+  } catch (error) {
+    console.error(
+      'Receive item at lab error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error:
+        'Internal server error while receiving item at lab',
+    });
+  }
+};
+
+
+/* =========================================================
+   4. GET JOBS READY FOR DELIVERY
+   ========================================================= */
+
+/**
+ * Get jobs where all items are ready for delivery.
+ *
+ * Job remains:
+ *
+ *     in_progress
+ *
+ * Items:
+ *
+ *     ready_for_delivery
+ */
+export const getPendingDeliveries = async (
+  _req: Request,
+  res: Response,
+) => {
+  try {
+    const candidateRows = await db
+      .select({
+        job: jobs,
+        jobItem: jobItems,
+      })
+      .from(jobs)
+      .innerJoin(
+        jobItems,
+        eq(
+          jobItems.jobId,
+          jobs.id,
+        ),
+      )
+      .where(
+        and(
+          eq(
+            jobs.currentStatus,
+            'in_progress',
+          ),
+          eq(
+            jobItems.currentStatus,
+            'ready_for_delivery',
+          ),
+        ),
+      )
+      .orderBy(
+        desc(jobs.updatedAt),
+      );
+
+    /* -----------------------------------------------------
+       Group items by job
+       ----------------------------------------------------- */
+
+    const jobMap = new Map<
+      string,
+      {
+        job: typeof candidateRows[number]['job'];
+        items: typeof candidateRows[number]['jobItem'][];
+      }
+    >();
+
+    for (const row of candidateRows) {
+      const existing =
+        jobMap.get(row.job.id);
+
+      if (existing) {
+        existing.items.push(
+          row.jobItem,
+        );
+      } else {
+        jobMap.set(
+          row.job.id,
+          {
+            job: row.job,
+            items: [row.jobItem],
+          },
+        );
+      }
+    }
+
+    /* -----------------------------------------------------
+       Verify that ALL items in each job are ready
+       ----------------------------------------------------- */
+
+    const readyJobs = [];
+
+    for (const entry of jobMap.values()) {
+      const allItems =
+        await getJobItems(
+          entry.job.id,
+        );
+
+      const allItemsReady =
+        allItems.length > 0 &&
+        allItems.every(
+          (item) =>
+            item.currentStatus ===
+            'ready_for_delivery',
+        );
+
+      if (allItemsReady) {
+        readyJobs.push({
+          job: entry.job,
+          items: allItems,
+        });
+      }
+    }
+
+    return res.status(200).json({
+      count: readyJobs.length,
+      jobs: readyJobs,
+    });
+  } catch (error) {
+    console.error(
+      'Fetch pending deliveries error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+
+/* =========================================================
+   5. ASSIGN WHOLE JOB FOR DELIVERY
+   ========================================================= */
+
+/**
+ * Assign the whole job to a delivery person.
+ *
+ * IMPORTANT:
+ *
+ * This only records the delivery person.
+ *
+ * It does NOT change the job status.
+ *
+ * Job remains:
+ *
+ *     in_progress
+ *
+ * Items remain:
+ *
+ *     ready_for_delivery
+ *
+ * until delivery actually starts.
+ */
+export const assignDelivery = async (
+  req: Request<
+    {},
+    {},
+    AssignDeliveryInput
+  >,
+  res: Response,
+) => {
+  try {
+    const {
+      jobId,
+      deliveryPersonId,
+      comment,
+    } = req.body;
+
+    const transportManagerId =
+      req.user?.userId;
+
+    if (!transportManagerId) {
+      return res.status(401).json({
+        error:
+          'Authenticated user not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Find job
+       ----------------------------------------------------- */
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Job must still be active
+       ----------------------------------------------------- */
+
+    if (
+      job.currentStatus !==
+      'in_progress'
+    ) {
+      return res.status(400).json({
+        error:
+          `Cannot assign delivery when job is '${job.currentStatus}'.`,
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate delivery person
+       ----------------------------------------------------- */
+
+    if (
+      !(await isActiveDeliveryPerson(
+        deliveryPersonId,
+      ))
+    ) {
+      return res.status(400).json({
+        error:
+          'Delivery person must be an active employee with the transport_team_person role.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Get all job items
+       ----------------------------------------------------- */
+
+    const items = await getJobItems(
+      jobId,
+    );
+
+    if (items.length === 0) {
+      return res.status(400).json({
+        error:
+          'Cannot assign delivery because the job has no items.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Every item must be ready for delivery
+       ----------------------------------------------------- */
+
+    const allItemsReady =
+      items.every(
+        (item) =>
+          item.currentStatus ===
+          'ready_for_delivery',
+      );
+
+    if (!allItemsReady) {
+      return res.status(400).json({
+        error:
+          'All job items must be ready_for_delivery before delivery can be assigned.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Assign delivery person
+       ----------------------------------------------------- */
+
+    const updatedJob =
+      await db.transaction(async (tx) => {
+        const [result] = await tx
+          .update(jobs)
+          .set({
+            assignedDeliveryTechId:
+              deliveryPersonId,
+            transportManagerId,
+            updatedAt: new Date(),
+          })
+          .where(
+            eq(
+              jobs.id,
+              jobId,
+            ),
+          )
+          .returning();
+
+        await addJobComment(
+          tx,
+          jobId,
+          transportManagerId,
+          comment,
+        );
+
+        return result;
+      });
+
+    return res.status(200).json({
+      message:
+        'Delivery person assigned successfully.',
+      job: updatedJob,
+    });
+  } catch (error) {
+    console.error(
+      'Assign delivery error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+
+const isActiveRepairManager = async (
+  userId: string,
+): Promise<boolean> => {
+  const [manager] = await db
+    .select({
+      id: users.id,
+    })
+    .from(users)
+    .innerJoin(
+      userRoles,
+      eq(userRoles.userId, users.id),
+    )
+    .innerJoin(
+      roles,
+      eq(userRoles.roleId, roles.id),
+    )
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.userType, 'employee'),
+        eq(users.isActive, true),
+        eq(roles.name, 'repair_manager'),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(manager);
+};
+
+export const getRepairManagers = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const managers = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: employeeProfiles.firstName,
+        lastName: employeeProfiles.lastName,
+        phone: employeeProfiles.phone,
+      })
+      .from(users)
+      .innerJoin(
+        userRoles,
+        eq(userRoles.userId, users.id),
+      )
+      .innerJoin(
+        roles,
+        eq(userRoles.roleId, roles.id),
+      )
+      .leftJoin(
+        employeeProfiles,
+        eq(
+          employeeProfiles.userId,
+          users.id,
+        ),
+      )
+      .where(
+        and(
+          eq(users.userType, 'employee'),
+          eq(users.isActive, true),
+          eq(roles.name, 'repair_manager'),
+        ),
+      )
+      .orderBy(asc(users.email));
+
+    return res.status(200).json({
+      count: managers.length,
+      managers,
+    });
+  } catch (error) {
+    console.error(
+      'Get repair managers error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+
+export const assignRepairManager = async (
+  req: Request<
+    {},
+    {},
+    AssignRepairManagerInput
+  >,
+  res: Response,
+) => {
+  try {
+    const {
+      jobId,
+      repairManagerId,
+      comment,
+    } = req.body;
+
+    const transportManagerId =
+      req.user?.userId;
+
+    if (!transportManagerId) {
+      return res.status(401).json({
+        error: 'Authenticated user not found',
+      });
+    }
+
+    // Find job
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found',
+      });
+    }
+
+    // Job must still be active
+    if (job.currentStatus !== 'in_progress') {
+      return res.status(400).json({
+        error:
+          `Cannot assign Repair Team Manager when job is '${job.currentStatus}'.`,
+      });
+    }
+
+    // Validate Repair Team Manager
+    const repairManagerActive =
+      await isActiveRepairManager(
+        repairManagerId,
+      );
+
+    if (!repairManagerActive) {
+      return res.status(400).json({
+        error:
+          'Assigned user must be an active employee with the repair_manager role.',
+      });
+    }
+
+    // Assign manager + record comment atomically
+    const updatedJob =
+      await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(jobs)
+          .set({
+            repairManagerId,
+            transportManagerId,
+            updatedAt: new Date(),
+          })
+          .where(eq(jobs.id, jobId))
+          .returning();
+
+        await tx
+          .insert(jobComments)
+          .values({
+            jobId,
+            userId: transportManagerId,
+            comment,
+          });
+
+        return updated;
+      });
+
+    return res.status(200).json({
+      message:
+        'Repair Team Manager assigned successfully.',
+      job: updatedJob,
+    });
+  } catch (error) {
+    console.error(
+      'Assign repair manager error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
   }
 };

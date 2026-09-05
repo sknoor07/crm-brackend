@@ -1,17 +1,9 @@
 import { Router } from 'express';
 
 import {
-  addJobComment,
-} from './comments.controller.js';
-
-import {
-  addCommentSchema,
-} from './comments.validation.js';
-
-import {
-  validateRequest,
-} from '../../shared/middleware/validateRequest.js';
-
+  getDashboardSummary,
+  getRecentJobs,
+} from './dashboard.controller.js';
 import {
   requireAuth,
   requireRole,
@@ -19,9 +11,8 @@ import {
 
 const router = Router();
 
-router.post(
-  '/',
-  requireAuth,
+router.use(requireAuth);
+router.use(
   requireRole([
     'admin',
     'customer_service',
@@ -29,9 +20,11 @@ router.post(
     'transport_team_person',
     'repair_manager',
     'repair_person',
+    'customer',
   ]),
-  validateRequest(addCommentSchema),
-  addJobComment,
 );
+
+router.get('/summary', getDashboardSummary);
+router.get('/recent-jobs', getRecentJobs);
 
 export default router;

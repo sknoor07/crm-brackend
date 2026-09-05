@@ -1,26 +1,103 @@
 import { Router } from 'express';
-import { getPendingPickups, assignTechnician, receiveAtLab, assignDelivery, getPendingDeliveries } from './transport.controller.js';
+
+import {
+  getPendingPickups,
+  assignTransportPerson,
+  receiveAtLab,
+  getPendingDeliveries,
+  assignDelivery,
+  getRepairManagers,
+  assignRepairManager,
+} from './transport.controller.js';
+
+import {
+  assignTransportPersonSchema,
+  receiveLabSchema,
+  assignDeliverySchema,
+  assignRepairManagerSchema,
+} from './transport.validation.js';
+
+import {
+  requireAuth,
+  requireRole,
+} from '../../shared/middleware/auth.js';
 import { validateRequest } from '../../shared/middleware/validateRequest.js';
-import { assignDeliverySchema, assignTechnicianSchema, receiveLabSchema } from './transport.validation.js';
-import { requireAuth, requireRole } from '../../shared/middleware/auth.js';
 
 const router = Router();
 
-// Apply auth and role checks to all transport routes
-router.use(requireAuth, requireRole(['admin', 'transport_manager']));
+router.use(
+  requireAuth,
+  requireRole([
+    'admin',
+    'transport_manager',
+  ]),
+);
 
-router.get('/pending', getPendingPickups);
-router.patch('/assign', validateRequest(assignTechnicianSchema), assignTechnician);
-// PATCH /api/v1/transport/receive-lab
+
+/**
+ * Jobs waiting for Transport Manager.
+ */
+router.get(
+  '/pending',
+  getPendingPickups,
+);
+
+
+/**
+ * Transport Manager assigns the whole job
+ * to a Transport/Repair Person.
+ */
+router.patch(
+  '/assign',
+  validateRequest(
+    assignTransportPersonSchema,
+  ),
+  assignTransportPerson,
+);
+
+
+/**
+ * Transport Manager receives an individual
+ * item at the lab.
+ */
 router.patch(
   '/receive-lab',
   validateRequest(receiveLabSchema),
-  receiveAtLab
+  receiveAtLab,
 );
 
-// GET /api/v1/transport/pending-deliveries
-router.get('/pending-deliveries', getPendingDeliveries);
 
-// PATCH /api/v1/transport/assign-delivery
-router.patch('/assign-delivery', validateRequest(assignDeliverySchema), assignDelivery);
+/**
+ * Jobs where every item is ready for delivery.
+ */
+router.get(
+  '/pending-deliveries',
+  getPendingDeliveries,
+);
+
+
+/**
+ * Transport Manager assigns the whole job
+ * to a delivery person.
+ */
+router.patch(
+  '/assign-delivery',
+  validateRequest(
+    assignDeliverySchema,
+  ),
+  assignDelivery,
+);
+
+
+router.get(
+  '/repair-managers',
+  getRepairManagers,
+);
+
+router.patch(
+  '/assign-repair-manager',
+  validateRequest(assignRepairManagerSchema),
+  assignRepairManager,
+);
 export default router;
+

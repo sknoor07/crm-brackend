@@ -1,11 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema , ZodError } from 'zod';
 
-export const validateRequest = (schema: ZodSchema) => {
+type ValidationSource = 'body' | 'params' | 'query';
+
+export const validateRequest = (
+  schema: ZodSchema,
+  source: ValidationSource = 'body',
+) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      // Parses the incoming request body against the provided Zod schema
-      await schema.parseAsync(req.body);
+      const parsed = await schema.parseAsync(req[source]);
+      Object.assign(req[source], parsed);
       next(); // Data is valid, proceed to the actual controller
     } catch (error) {
       if (error instanceof ZodError) {

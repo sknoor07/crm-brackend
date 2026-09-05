@@ -8,7 +8,9 @@
     "dev": "tsx watch src/index.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
-    "db:setup": "npm run db:push && npm run db:seed"
+    "db:setup": "npm run db:push && npm run db:seed",
+    "db:generate": "drizzle-kit generate",
+"db:migrate": "drizzle-kit migrate"
   },
   "keywords": [],
   "author": "",

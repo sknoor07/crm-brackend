@@ -2,9 +2,8 @@ import { Request, Response } from 'express';
 import { and, eq, gt, inArray, isNull, lt } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { users, employeeProfiles, accountInvitations, roles, userRoles } from '../../db/schema/index.js';
-import { hashPassword } from '../../shared/utils/password.js';
+import { hashPassword,comparePasswords } from '../../shared/utils/password.js';
 import { RegisterEmployeeInput } from './auth.validation.js';
-import { comparePasswords } from '../../shared/utils/password.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../../shared/utils/jwt.js';
 import { refreshTokens } from '../../db/schema/index.js';
 import { AcceptInvitationInput, LoginInput } from './auth.validation.js';
@@ -190,6 +189,11 @@ export const loginUser = async (req: Request<{}, {}, LoginInput>, res: Response)
       password,
       user.passwordHash
     );
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        error: 'Invalid email or password',
+      });
+    }
 
     // 3. Generate Tokens
     const accessToken = generateAccessToken({ userId: user.id, userType: user.userType });

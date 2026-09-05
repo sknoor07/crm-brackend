@@ -1,19 +1,69 @@
 import { z } from 'zod';
 
-export const assignTechnicianSchema = z.object({
-  jobId: z.string().uuid("Invalid job ID format"),
-  technicianId: z.string().uuid("Invalid technician ID format"),
+export const assignTransportPersonSchema = z.object({
+  jobId: z.string().uuid('Invalid job ID format'),
+
+  transportPersonId: z
+    .string()
+    .uuid('Invalid transport person ID format'),
+
+  comment: z
+    .string()
+    .trim()
+    .min(1, 'Comment is required')
+    .max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
-export type AssignTechnicianInput = z.infer<typeof assignTechnicianSchema>;
+export type AssignTransportPersonInput =
+  z.infer<typeof assignTransportPersonSchema>;
+
 
 export const receiveLabSchema = z.object({
-  jobId: z.string().uuid("Invalid job ID format"),
+  jobItemId: z
+    .string()
+    .uuid('Invalid job item ID format'),
+
+  comment: z
+    .string()
+    .trim()
+    .min(1, 'Comment is required')
+    .max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
-export type ReceiveLabInput = z.infer<typeof receiveLabSchema>;
+export type ReceiveLabInput =
+  z.infer<typeof receiveLabSchema>;
+
 
 export const assignDeliverySchema = z.object({
-  jobId: z.string().uuid("Invalid job ID format"),
-  technicianId: z.string().uuid("Invalid technician ID format"),
+  jobId: z.string().uuid('Invalid job ID format'),
+
+  deliveryPersonId: z
+    .string()
+    .uuid('Invalid delivery person ID format'),
+
+  comment: z
+    .string()
+    .trim()
+    .min(1, 'Comment is required')
+    .max(2000, 'Comment cannot exceed 2000 characters'),
 });
+
+export type AssignDeliveryInput =
+  z.infer<typeof assignDeliverySchema>;
+
+  export const assignRepairManagerSchema = z.object({
+  jobId: z.string().uuid('Invalid job ID format'),
+
+  repairManagerId: z
+    .string()
+    .uuid('Invalid repair manager ID format'),
+
+  comment: z
+    .string()
+    .trim()
+    .min(1, 'Comment is required')
+    .max(2000, 'Comment cannot exceed 2000 characters'),
+});
+
+export type AssignRepairManagerInput =
+  z.infer<typeof assignRepairManagerSchema>;

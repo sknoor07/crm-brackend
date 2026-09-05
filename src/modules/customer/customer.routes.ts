@@ -1,26 +1,51 @@
 import { Router } from 'express';
-import { createCustomerJob, respondToQuote } from './customer.controller.js';
+
+import {
+  createCustomerJob,
+  respondToQuote,
+} from './customer.controller.js';
+
+
 import { validateRequest } from '../../shared/middleware/validateRequest.js';
-import { createCustomerJobSchema, quoteResponseSchema } from './customer.validation.js';
-import { requireAuth, requireRole } from '../../shared/middleware/auth.js';
+
+import {
+  createCustomerJobSchema,
+  quoteResponseSchema,
+} from './customer.validation.js';
+
+import {
+  requireAuth,
+  requireRole,
+} from '../../shared/middleware/auth.js';
+import { getCustomerOrders } from './orders.controller.js';
 
 const router = Router();
+
+router.get(
+  '/orders',
+  requireAuth,
+  requireRole(['customer']),
+  getCustomerOrders,
+);
 
 router.post(
   '/jobs',
   requireAuth,
   requireRole(['customer']),
   validateRequest(createCustomerJobSchema),
-  createCustomerJob
+  createCustomerJob,
 );
 
-// PATCH /api/v1/customer/quote-response
 router.patch(
   '/quote-response',
   requireAuth,
-  requireRole(['admin', 'customer_service', 'customer']),
+  requireRole([
+    'admin',
+    'customer_service',
+    'customer',
+  ]),
   validateRequest(quoteResponseSchema),
-  respondToQuote
+  respondToQuote,
 );
 
 export default router;
