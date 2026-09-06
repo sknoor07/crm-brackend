@@ -1,10 +1,12 @@
-import { and, desc, eq, ilike, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm';
 import { Request, Response } from 'express';
 
 import { db } from '../../config/database.js';
 import {
   customerProfiles,
   jobComments,
+  jobItemQuoteLines,
+  jobItemQuotes,
   jobItems,
   jobs,
   jobStatusHistory,
@@ -157,6 +159,45 @@ export const getJobById = async (req: Request, res: Response) => {
       .where(eq(jobItems.jobId, job.id))
       .orderBy(desc(jobItems.createdAt));
 
+    const itemIds = items.map((item) => item.id);
+    const quotes = itemIds.length
+      ? await db
+          .select()
+          .from(jobItemQuotes)
+          .where(inArray(jobItemQuotes.jobItemId, itemIds))
+          .orderBy(desc(jobItemQuotes.version))
+      : [];
+
+    const quoteIds = quotes.map((quote) => quote.id);
+    const lines = quoteIds.length
+      ? await db
+          .select()
+          .from(jobItemQuoteLines)
+          .where(inArray(jobItemQuoteLines.quoteId, quoteIds))
+          .orderBy(asc(jobItemQuoteLines.sortOrder))
+      : [];
+
+    const linesByQuoteId = new Map<string, typeof lines>();
+    for (const line of lines) {
+      const existing = linesByQuoteId.get(line.quoteId) ?? [];
+      existing.push(line);
+      linesByQuoteId.set(line.quoteId, existing);
+    }
+
+    const itemsWithQuotes = items.map((item) => ({
+      ...item,
+      quotes: quotes
+        .filter((quote) => quote.jobItemId === item.id)
+        .map((quote) => ({
+          ...quote,
+          components: linesByQuoteId.get(quote.id) ?? [],
+        })),
+    }));
+
+    // #region agent log
+    fetch('http://127.0.0.1:7382/ingest/119b0d15-a375-4f9f-95a5-b87c6fbcf288',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9a98d3'},body:JSON.stringify({sessionId:'9a98d3',runId:'pre-fix',hypothesisId:'H2',location:'read.controller.ts:getJobById',message:'Loaded job quotes with lines',data:{jobId:job.id,itemCount:items.length,quoteCount:quotes.length,lineCount:lines.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     return res.status(200).json({
       success: true,
       data: {
@@ -172,7 +213,7 @@ export const getJobById = async (req: Request, res: Response) => {
           email: job.customerEmail,
           phone: job.customerPhone,
         },
-        items,
+        items: itemsWithQuotes,
         createdAt: job.createdAt,
         updatedAt: job.updatedAt,
       },

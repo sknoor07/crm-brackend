@@ -10,8 +10,7 @@ export const repairLocation = pgEnum(
   repairLocationValues,
 );
 
-export type RepairLocation =
-  (typeof repairLocationValues)[number];
+export type RepairLocation = (typeof repairLocationValues)[number];
 
 
 /**
@@ -79,10 +78,6 @@ export const jobItemStatusValues = [
   'cancelled',
 ] as const;
 
-export const jobItemStatus = pgEnum(
-  'job_item_status',
-  jobItemStatusValues
-);
+export const jobItemStatus = pgEnum('job_item_status',jobItemStatusValues);
 
-export type JobItemStatus =
-  (typeof jobItemStatusValues)[number];
+export type JobItemStatus = (typeof jobItemStatusValues)[number];

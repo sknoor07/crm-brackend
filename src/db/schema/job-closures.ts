@@ -12,27 +12,17 @@ import { users } from './users.js';
 export const jobClosures = pgTable('job_closures', {
   id: uuid('id').defaultRandom().primaryKey(),
 
-  jobId: uuid('job_id')
-    .references(() => jobs.id)
-    .notNull()
-    .unique(),
+  jobId: uuid('job_id').references(() => jobs.id).notNull().unique(),
 
-  closedByUserId: uuid('closed_by_user_id')
-    .references(() => users.id)
-    .notNull(),
+  closedByUserId: uuid('closed_by_user_id').references(() => users.id).notNull(),
 
   closureReason: text('closure_reason'),
 
-  customerConfirmed: boolean(
-    'customer_confirmed',
-  ).default(false),
+  customerConfirmed: boolean('customer_confirmed',).default(false),
 
-  paymentConfirmed: boolean(
-    'payment_confirmed',
-  ).default(false),
+  paymentConfirmed: boolean('payment_confirmed',).default(false),
 
   notes: text('notes'),
 
-  closedAt: timestamp('closed_at')
-    .defaultNow(),
+  closedAt: timestamp('closed_at').defaultNow(),
 });

@@ -27,6 +27,12 @@ import {
 import {
   generateJobNumber,
 } from '../../shared/utils/jobNumber.js';
+import {
+  buildQuoteLineValues,
+  insertJobItemQuoteWithLines,
+  moneyString,
+  resolveQuoteComponents,
+} from './quote-components.js';
 
 export const getDeviceCategories = async (
   req: Request,
@@ -75,6 +81,7 @@ export const createJobByCS = async (
       deviceSerialNumber,
       issueDescription,
       estimatedComponentsCost,
+      estimatedComponents,
       billingAddress,
       comment,
     } = req.body;
@@ -95,6 +102,8 @@ export const createJobByCS = async (
       .select({
         deviceCategory:
           deviceServiceCharges.deviceCategory,
+        chargeAmount:
+          deviceServiceCharges.chargeAmount,
       })
       .from(deviceServiceCharges)
       .where(
@@ -255,6 +264,22 @@ export const createJobByCS = async (
         // Create Job Item
         // ----------------------------------------------
 
+        const estimateComponents = resolveQuoteComponents(
+          estimatedComponents,
+          estimatedComponentsCost,
+        );
+
+        if (!estimateComponents) {
+          throw new Error(
+            'Estimated components are required',
+          );
+        }
+
+        const estimatedCost = moneyString(
+          buildQuoteLineValues('estimate', estimateComponents)
+            .componentsCost,
+        );
+
         const [createdJobItem] =
           await tx
             .insert(jobItems)
@@ -268,13 +293,21 @@ export const createJobByCS = async (
 
               issueDescription,
 
-              estimatedComponentsCost:
-                estimatedComponentsCost.toString(),
+              estimatedComponentsCost: estimatedCost,
 
               currentStatus:
                 'pending_cs_verification',
             })
             .returning();
+
+        await insertJobItemQuoteWithLines(tx, {
+          jobItemId: createdJobItem.id,
+          version: 1,
+          components: estimateComponents,
+          serviceCharge: configuredCategory.chargeAmount,
+          createdByUserId: changedBy,
+          status: 'estimate',
+        });
 
         // ----------------------------------------------
         // Job status history

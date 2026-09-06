@@ -16,6 +16,7 @@ import {
   warranties,
   repeatRepairs,
   jobItemQuotes,
+  jobItemQuoteLines,
   jobItemStatusHistory,
 } from './src/db/schema/index.js';
 
@@ -108,6 +109,12 @@ export type JobItemQuote =
 
 export type NewJobItemQuote =
   typeof jobItemQuotes.$inferInsert;
+
+export type JobItemQuoteLine =
+  typeof jobItemQuoteLines.$inferSelect;
+
+export type NewJobItemQuoteLine =
+  typeof jobItemQuoteLines.$inferInsert;
 
 export type {
   JobSummaryStatus,

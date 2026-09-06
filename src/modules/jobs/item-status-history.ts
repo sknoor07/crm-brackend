@@ -103,52 +103,57 @@ export const allowedJobItemTransitions: Record<
   cancelled: [],
 };
 
-export const updateJobItemWithStatusTransition =
-  async <T>(
-    jobItemId: string,
-    previousStatus: JobItemStatus | null,
-    newStatus: JobItemStatus,
-    updateJobItem: (
-      tx: DbTransaction,
-    ) => Promise<T>,
-    changedBy: string,
-    note: string,
-  ): Promise<T> => {
-    const transitionKey =
-      previousStatus ?? 'created';
+export const updateJobItemWithStatusTransition = async <T>(
+  jobItemId: string,
+  previousStatus: JobItemStatus | null,
+  newStatus: JobItemStatus,
+  updateJobItem: (tx: any) => Promise<T>,
+  changedBy: string,
+  note: string,
+  existingTx?: any,
+): Promise<T> => {
 
-    if (
-      !allowedJobItemTransitions[
-        transitionKey
-      ]?.includes(newStatus)
-    ) {
-      throw new Error(
-        `Invalid job item status transition: ${transitionKey} -> ${newStatus}`,
-      );
-    }
+  const transitionKey = previousStatus ?? 'created';
 
-    return db.transaction(async (tx) => {
-      const updatedJobItem =
-        await updateJobItem(tx);
+  if (!allowedJobItemTransitions[transitionKey]?.includes(newStatus)) {
+    throw new Error(
+      `Invalid job item status transition: ${transitionKey} -> ${newStatus}`
+    );
+  }
 
-      await tx
-        .insert(jobItemStatusHistory)
-        .values({
-          jobItemId,
-          previousStatus,
-          newStatus,
-          changedBy,
-          note,
-        });
+  const executeTransition = async (tx: any): Promise<T> => {
 
-      await tx
-        .insert(jobComments)
-        .values({
-          jobItemId,
-          userId: changedBy,
-          comment: note,
-        });
+    const updatedJobItem = await updateJobItem(tx);
 
-      return updatedJobItem;
+    await tx.insert(jobItemStatusHistory).values({
+      jobItemId,
+      previousStatus,
+      newStatus,
+      changedBy,
+      note,
     });
+
+    await tx.insert(jobComments).values({
+      jobItemId,
+      userId: changedBy,
+      comment: note,
+    });
+
+    return updatedJobItem;
   };
+
+  /*
+   * If a transaction was already created by the caller,
+   * use that transaction.
+   */
+  if (existingTx) {
+    return executeTransition(existingTx);
+  }
+
+  /*
+   * Otherwise create a new transaction.
+   */
+  return db.transaction(async (tx) => {
+    return executeTransition(tx);
+  });
+};

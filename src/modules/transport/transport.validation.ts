@@ -3,15 +3,9 @@ import { z } from 'zod';
 export const assignTransportPersonSchema = z.object({
   jobId: z.string().uuid('Invalid job ID format'),
 
-  transportPersonId: z
-    .string()
-    .uuid('Invalid transport person ID format'),
+  transportPersonId: z.string().uuid('Invalid transport person ID format'),
 
-  comment: z
-    .string()
-    .trim()
-    .min(1, 'Comment is required')
-    .max(2000, 'Comment cannot exceed 2000 characters'),
+  comment: z.string().trim().min(1, 'Comment is required').max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
 export type AssignTransportPersonInput =

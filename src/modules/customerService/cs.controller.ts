@@ -1,184 +1,94 @@
 import { Request, Response } from 'express';
 
-import {
-  asc,
-  desc,
-  eq,
-  inArray,
-} from 'drizzle-orm';
+import {asc,desc,eq,inArray} from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import {
-  jobs,
-  jobItems,
-  jobComments,
-  jobStatusHistory,
-  jobClosures,
-  jobItemQuotes,
-  deviceServiceCharges,
-} from '../../db/schema/index.js';
+import {jobs,jobItems,jobComments,jobStatusHistory,jobClosures,jobItemQuotes,deviceServiceCharges, jobItemQuoteLines, JobItemStatus, jobItemStatusHistory, JobSummaryStatus,} from '../../db/schema/index.js';
 
-import {
-  CSApproveJobItemInput,
-  CSRejectJobItemInput,
-  GenerateFinalQuoteInput,
-  CloseJobInput,
-  ConfirmOnsiteRepairInput,
+import {CSRejectJobItemInput,GenerateFinalQuoteInput,CloseJobInput,ConfirmOnsiteRepairInput, CSApproveJobAndJobItemInput, 
 } from './cs.validation.js';
 
-import {
-  updateJobItemWithStatusTransition,
-} from '../jobs/item-status-history.js';
+import {updateJobItemWithStatusTransition} from '../jobs/item-status-history.js';
+import {buildQuoteLineValues, insertJobItemQuoteWithLines, moneyString, resolveQuoteComponents} from '../jobs/quote-components.js';
+import { processCSJobApproval } from './service/approveJobsByCS.js';
 
 
-/**
- * ============================================================
- * CS - APPROVE JOB ITEM
- * ============================================================
- *
- * Workflow:
- *
- * pending_cs_verification
- *          ↓
- * approved_for_transport
- *
- * The job itself remains:
- *
- * in_progress
- *
- * The workflow status belongs to the job item.
- */
-export const approveJobItemByCS = async (
-  req: Request<{}, {}, CSApproveJobItemInput>,
-  res: Response,
-) => {
+// Get All Jobs which are applied by customer and pending for approval at cs
+export const getJobsWaitingForCSApproval = async (req: Request,res: Response,) => {
   try {
-    const {
-      jobItemId,
-      estimatedComponentsCost,
-      comment,
-    } = req.body;
-
-    const csUserId = req.user?.userId;
-
-    if (!csUserId) {
-      return res.status(401).json({
-        error: 'Authenticated CS user is required',
-      });
-    }
-
-    const [jobItem] = await db
-      .select()
+    const data = await db
+      .select({job: jobs,jobItem: jobItems,})
       .from(jobItems)
-      .where(eq(jobItems.id, jobItemId))
-      .limit(1);
+      .innerJoin(jobs,eq(jobItems.jobId, jobs.id),)
+      .where(eq(jobItems.currentStatus,'pending_cs_verification',),)
+      .orderBy(desc(jobItems.updatedAt),);
 
-    if (!jobItem) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
+    // Group job items by job ID
+    const groupedJobs = new Map<string,{job: typeof jobs.$inferSelect;jobItems: typeof jobItems.$inferSelect[];}>();
+
+    for (const row of data) {
+      const jobId = row.job.id;
+
+      if (!groupedJobs.has(jobId)) {
+        groupedJobs.set(jobId, {job: row.job,jobItems: [],});
+      }
+
+      groupedJobs.get(jobId)!.jobItems.push(row.jobItem);
     }
 
-    if (
-      jobItem.currentStatus !==
-      'pending_cs_verification'
-    ) {
-      return res.status(400).json({
-        error:
-          `Job item cannot be approved because its current status is '${jobItem.currentStatus}'`,
-      });
-    }
+    const result = Array.from(groupedJobs.values(),);
 
-    const updatedJobItem =
-      await updateJobItemWithStatusTransition(
-        jobItem.id,
-        jobItem.currentStatus,
-        'approved_for_transport',
-
-        async (tx) => {
-          const [updated] = await tx
-            .update(jobItems)
-            .set({
-              currentStatus:
-                'approved_for_transport',
-
-              ...(estimatedComponentsCost !== undefined
-                ? {
-                    estimatedComponentsCost:
-                      estimatedComponentsCost.toString(),
-                  }
-                : {}),
-
-              updatedAt: new Date(),
-            })
-            .where(eq(jobItems.id, jobItem.id))
-            .returning();
-
-          return updated;
-        },
-
-        csUserId,
-        comment.trim(),
-      );
-
-    return res.status(200).json({
-      message:
-        'Job item verified successfully and approved for transport.',
-      jobItem: updatedJobItem,
-    });
+    return res.status(200).json({count: result.length,jobs: result,});
   } catch (error) {
-    console.error(
-      'CS Job Item Approval Error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error:
-        'Internal server error during job item approval',
-    });
+    console.error('Error fetching jobs waiting for CS approval:',error,);
+    return res.status(500).json({error:'Internal server error while fetching jobs',});
   }
 };
 
+
+
 /**
- * ============================================================
- * CS - REJECT JOB ITEM
- * ============================================================
- *
- * Workflow:
- *
- * pending_cs_verification
- *          ↓
- * repair_rejected
+ Job Item Approve for Transport team Manager so he can arrange for Pickup only by Transport Team Members
+ */ 
+ export const approveJobByCS = async (req: Request<{},{},CSApproveJobAndJobItemInput>,res: Response,) => {
+   try {
+     const csUserId = req.user?.userId;
+ 
+     if (!csUserId) {
+       return res.status(401).json({error: 'Authenticated CS user is required',});
+     }
+ 
+     const result = await processCSJobApproval(req.body,csUserId);
+ 
+     return res.status(200).json({message:'CS job verification processed successfully.',
+       job: result.job,
+       jobItems: result.jobItems,
+     });
+   } catch (error) {console.error('CS job approval error:',error,);
+ 
+     return res.status(400).json({error: error instanceof Error? error.message: 'Failed to process CS job verification',});
+   }
+ };
+
+/**
+customer  rejects a repair for a item
  */
-export const rejectJobItemByCS = async (
-  req: Request<{}, {}, CSRejectJobItemInput>,
-  res: Response,
-) => {
+export const rejectJobItemByCS = async (req: Request<{}, {}, CSRejectJobItemInput>, res: Response) => {
   try {
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
+    const {jobItemId, comment} = req.body;
 
     const csUserId = req.user?.userId;
 
     if (!csUserId) {
-      return res.status(401).json({
-        error: 'Authenticated CS user is required',
-      });
+      return res.status(401).json({ error: 'Authenticated CS user is required' });
     }
 
-    const [jobItem] = await db
-      .select()
-      .from(jobItems)
-      .where(eq(jobItems.id, jobItemId))
-      .limit(1);
+    const [jobItem] = await db.select()
+      .from(jobItems).where(eq(jobItems.id, jobItemId)).limit(1);
 
     if (!jobItem) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
+      return res.status(404).json({ error: 'Job item not found' });
     }
 
     if (
@@ -191,44 +101,13 @@ export const rejectJobItemByCS = async (
       });
     }
 
-    const updatedJobItem =
-      await updateJobItemWithStatusTransition(
-        jobItem.id,
-        jobItem.currentStatus,
-        'repair_rejected',
+    const updatedJobItem = await updateJobItemWithStatusTransition(jobItem.id,jobItem.currentStatus,'repair_rejected', 
+      async (tx) => {const [updated] = await tx.update(jobItems).set({ currentStatus: 'repair_rejected', updatedAt: new Date() }).where(eq(jobItems.id, jobItem.id)).returning(); return updated; },csUserId,comment.trim());
 
-        async (tx) => {
-          const [updated] = await tx
-            .update(jobItems)
-            .set({
-              currentStatus: 'repair_rejected',
-              updatedAt: new Date(),
-            })
-            .where(eq(jobItems.id, jobItem.id))
-            .returning();
-
-          return updated;
-        },
-
-        csUserId,
-        comment.trim(),
-      );
-
-    return res.status(200).json({
-      message:
-        'Job item rejected successfully.',
-      jobItem: updatedJobItem,
-    });
+    return res.status(200).json({ message: 'Job item rejected successfully.', jobItem: updatedJobItem });
   } catch (error) {
-    console.error(
-      'CS Job Item Rejection Error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error:
-        'Internal server error during job item rejection',
-    });
+    console.error('CS Job Item Rejection Error:', error);
+    return res.status(500).json({ error: 'Internal server error during job item rejection' });
   }
 };
 
@@ -263,52 +142,26 @@ export const rejectJobItemByCS = async (
  *
  * in_progress
  */
-export const generateFinalQuote = async (
-  req: Request<{}, {}, GenerateFinalQuoteInput>,
-  res: Response,
-) => {
+export const generateFinalQuote = async (req: Request<{}, {}, GenerateFinalQuoteInput>, res: Response) => {
   try {
-    const {
-      jobItemId,
-      finalComponentsCost,
-      comment,
-    } = req.body;
+    const {jobItemId, components, comment} = req.body;
 
     const csUserId = req.user?.userId;
 
     if (!csUserId) {
-      return res.status(401).json({
-        error: 'Authenticated CS user is required',
-      });
+      return res.status(401).json({ error: 'Authenticated CS user is required' });
     }
 
-    const [jobItem] = await db
-      .select()
-      .from(jobItems)
-      .where(eq(jobItems.id, jobItemId))
-      .limit(1);
+    const [jobItem] = await db.select().from(jobItems).where(eq(jobItems.id, jobItemId)).limit(1);
 
     if (!jobItem) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
+      return res.status(404).json({ error: 'Job item not found' });
     }
 
-    const allowedQuoteStatuses = [
-      'pending_final_quote',
-      'pending_final_quote_onsite',
-    ] as const;
+    const allowedQuoteStatuses = ['pending_final_quote', 'pending_final_quote_onsite'] as const;
 
-    if (
-      !allowedQuoteStatuses.includes(
-        jobItem.currentStatus as
-          (typeof allowedQuoteStatuses)[number],
-      )
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot generate quote from status '${jobItem.currentStatus}'`,
-      });
+    if (!allowedQuoteStatuses.includes(jobItem.currentStatus as (typeof allowedQuoteStatuses)[number])) {
+      return res.status(400).json({ error: `Cannot generate quote from status '${jobItem.currentStatus}'` });
     }
 
     /**
@@ -318,54 +171,27 @@ export const generateFinalQuote = async (
      * This is important because the service charge
      * is not exposed to the customer initially.
      */
-    const [serviceCharge] = await db
-      .select()
-      .from(deviceServiceCharges)
-      .where(
-        eq(
-          deviceServiceCharges.deviceCategory,
-          jobItem.deviceCategory,
-        ),
-      )
-      .limit(1);
+    const [serviceCharge] = await db.select()
+      .from(deviceServiceCharges).where(eq(deviceServiceCharges.deviceCategory, jobItem.deviceCategory)).limit(1);
 
     if (!serviceCharge) {
-      return res.status(400).json({
-        error:
-          `No service charge configured for category: ${jobItem.deviceCategory}`,
-      });
+      return res.status(400).json({ error: `No service charge configured for category: ${jobItem.deviceCategory}` });
     }
 
-    const componentsCost =
-      finalComponentsCost;
-
-    const serviceChargeAmount =
-      Number(serviceCharge.chargeAmount);
-
-    const totalAmount =
-      componentsCost +
-      serviceChargeAmount;
+    const preview = buildQuoteLineValues('preview', components);
+    const serviceChargeAmount = Number(serviceCharge.chargeAmount);
+    const totalAmount = preview.componentsCost + serviceChargeAmount;
 
     /**
      * Find the latest quote version so that
      * every new quote gets the next version.
      */
-    const [latestQuote] = await db
-      .select()
-      .from(jobItemQuotes)
-      .where(
-        eq(
-          jobItemQuotes.jobItemId,
-          jobItem.id,
-        ),
-      )
-      .orderBy(
-        desc(jobItemQuotes.version),
-      )
-      .limit(1);
+    const [latestQuote] = await db.select().from(jobItemQuotes).where(eq(jobItemQuotes.jobItemId, jobItem.id)).orderBy(desc(jobItemQuotes.version)).limit(1);
 
     const nextVersion =
       (latestQuote?.version ?? 0) + 1;
+
+    let persistedQuote: {quoteId: string;lineCount: number;componentsCost: number;totalAmount: number} | null = null;
 
     const updatedJobItem =
       await updateJobItemWithStatusTransition(
@@ -374,11 +200,22 @@ export const generateFinalQuote = async (
         'awaiting_customer_approval',
 
         async (tx) => {
+          const created = await insertJobItemQuoteWithLines(tx, {
+            jobItemId: jobItem.id,
+            version: nextVersion,
+            components,
+            serviceCharge: serviceCharge.chargeAmount,
+            createdByUserId: csUserId,
+            status: 'pending_customer_approval',
+          });
+
+          persistedQuote = { quoteId: created.quote.id, lineCount: created.lines.length, componentsCost: created.componentsCost, totalAmount: created.totalAmount };
+
           const [updated] = await tx
             .update(jobItems)
             .set({
               finalComponentsCost:
-                componentsCost.toString(),
+                moneyString(created.componentsCost),
 
               serviceChargeApplied:
                 serviceCharge.chargeAmount,
@@ -393,36 +230,12 @@ export const generateFinalQuote = async (
             .where(eq(jobItems.id, jobItem.id))
             .returning();
 
-          await tx.insert(jobItemQuotes).values({
-            jobItemId: jobItem.id,
-
-            version: nextVersion,
-
-            componentsCost:
-              componentsCost.toString(),
-
-            serviceCharge:
-              serviceCharge.chargeAmount,
-
-            totalAmount:
-              totalAmount.toString(),
-
-            createdByUserId:
-              csUserId,
-
-            customerApproved: null,
-
-            status:
-              'pending_customer_approval',
-          });
-
           return updated;
         },
 
         csUserId,
         comment.trim(),
       );
-
     return res.status(200).json({
       message:
         'Final quote generated successfully. Awaiting customer approval.',
@@ -430,11 +243,20 @@ export const generateFinalQuote = async (
       jobItem: updatedJobItem,
 
       quote: {
+        id: (persistedQuote as {
+          quoteId: string;
+        } | null)?.quoteId,
         version: nextVersion,
-        componentsCost,
+        componentsCost: preview.componentsCost,
         serviceCharge:
           serviceChargeAmount,
         totalAmount,
+        components: preview.lines.map((line) => ({
+          name: line.name,
+          quantity: line.quantity,
+          unitPrice: Number(line.unitPrice),
+          lineTotal: Number(line.lineTotal),
+        })),
       },
     });
   } catch (error) {
@@ -457,48 +279,18 @@ export const generateFinalQuote = async (
  *
  * Both onsite and lab items can require a final quote.
  */
-export const getPendingFinalQuotes = async (
-  req: Request,
-  res: Response,
-) => {
+export const getPendingFinalQuotes = async (req: Request,res: Response,) => {
   try {
-    const pendingQuotes = await db
-      .select({
-        job: jobs,
-        jobItem: jobItems,
-      })
-      .from(jobItems)
-      .innerJoin(
-        jobs,
-        eq(jobItems.jobId, jobs.id),
-      )
-      .where(
-        inArray(
-          jobItems.currentStatus,
-          [
-            'pending_final_quote',
-            'pending_final_quote_onsite',
-          ],
-        ),
-      )
-      .orderBy(
-        desc(jobItems.updatedAt),
-      );
+    const pendingQuotes = await db.select({job: jobs,jobItem: jobItems,}).from(jobItems)
+      .innerJoin(jobs,eq(jobItems.jobId, jobs.id),)
+      .where(inArray(jobItems.currentStatus,['pending_final_quote','pending_final_quote_onsite',],),)
+      .orderBy(desc(jobItems.updatedAt),);
 
-    return res.status(200).json({
-      count: pendingQuotes.length,
-      jobs: pendingQuotes,
-    });
+    return res.status(200).json({count: pendingQuotes.length,jobs: pendingQuotes,});
   } catch (error) {
-    console.error(
-      'Fetch pending quotes error:',
-      error,
-    );
+    console.error('Fetch pending quotes error:',error,);
 
-    return res.status(500).json({
-      error:
-        'Internal server error while fetching pending quotes',
-    });
+    return res.status(500).json({error:'Internal server error while fetching pending quotes',});
   }
 };
 
@@ -511,47 +303,9 @@ export const getPendingFinalQuotes = async (
  *
  * Job status is NOT used here.
  */
-export const getJobsWaitingForCSApproval = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const data = await db
-      .select({
-        job: jobs,
-        jobItem: jobItems,
-      })
-      .from(jobItems)
-      .innerJoin(
-        jobs,
-        eq(jobItems.jobId, jobs.id),
-      )
-      .where(
-        eq(
-          jobItems.currentStatus,
-          'pending_cs_verification',
-        ),
-      )
-      .orderBy(
-        desc(jobItems.updatedAt),
-      );
 
-    return res.status(200).json({
-      count: data.length,
-      jobs: data,
-    });
-  } catch (error) {
-    console.error(
-      'Error fetching jobs waiting for CS approval:',
-      error,
-    );
 
-    return res.status(500).json({
-      error:
-        'Internal server error while fetching jobs',
-    });
-  }
-};
+
 
 /**
  * ============================================================

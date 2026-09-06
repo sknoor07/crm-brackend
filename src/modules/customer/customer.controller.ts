@@ -3,239 +3,56 @@ import { eq } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import {
-  jobs,
-  jobItems,
-  jobComments,
-  deviceServiceCharges,
-} from '../../db/schema/index.js';
+import {jobs,jobItems,jobComments,deviceServiceCharges,} from '../../db/schema/index.js';
 
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 
-import {
-  updateJobItemWithStatusTransition,
-} from '../jobs/item-status-history.js';
+import {updateJobItemWithStatusTransition,} from '../jobs/item-status-history.js';
 
-import {
-  CreateCustomerJobInput,
-  QuoteResponseInput,
-} from './customer.validation.js';
+import {CreateCustomerJobInput,CreateCustomerJobItemSchema, QuoteResponseInput} from './customer.validation.js';
 
 
 /**
- * ============================================================
- * CUSTOMER - CREATE JOB
- * ============================================================
- *
- * Customer creates a new repair request.
- *
- * IMPORTANT:
- *
- * The JOB uses the job-level summary status:
- *
- *     in_progress
- *
- * The individual JOB ITEM uses the detailed workflow status:
- *
- *     pending_cs_verification
- *
- * Therefore:
- *
- * JOB
- *     currentStatus = in_progress
- *
- * JOB ITEM
- *     currentStatus = pending_cs_verification
- *
- * The job itself remains in_progress throughout the workflow
- * until CS finally closes it.
+customer will create a job will multiple job items.
  */
-export const createCustomerJob = async (
-  req: Request<{}, {}, CreateCustomerJobInput>,
-  res: Response,
-) => {
+export const createCustomerJob = async (req: Request<{}, {}, CreateCustomerJobInput>,res: Response,) => {
   try {
-    const {
-      deviceCategory,
-      issueDescription,
-      comment,
-    } = req.body;
+    const {items,comment} = req.body;
 
-    const customerId =
-      req.user?.userId;
+    const customerId =req.user?.userId;
 
     if (!customerId) {
-      return res.status(401).json({
-        error:
-          'Authenticated customer is required',
-      });
+      return res.status(401).json({error:'Authenticated customer is required',});
     }
 
-    /* ---------------------------------------------------------
-       Verify device category
-       --------------------------------------------------------- */
-
-    const [configuredCategory] =
-      await db
-        .select({
-          deviceCategory:
-            deviceServiceCharges.deviceCategory,
-        })
-        .from(deviceServiceCharges)
-        .where(
-          eq(
-            deviceServiceCharges.deviceCategory,
-            deviceCategory,
-          ),
-        )
-        .limit(1);
-
-    if (!configuredCategory) {
-      return res.status(400).json({
-        error:
-          `Invalid device category: ${deviceCategory}`,
-      });
-    }
-
-    /* ---------------------------------------------------------
-       Generate IDs and job number
-       --------------------------------------------------------- */
-
-    const jobId =
-      crypto.randomUUID();
-
-    const jobItemId =
-      crypto.randomUUID();
-
-    const jobNumber =
-      generateJobNumber();
-
-    /* ---------------------------------------------------------
-       Create job + job item in one transaction
-       --------------------------------------------------------- */
-
-    const result =
-      await updateJobItemWithStatusTransition(
-        jobItemId,
-        null,
-        'pending_cs_verification',
-
-        async (tx) => {
-          /* ---------------------------------------------------
-             Create customer-level JOB
-             ---------------------------------------------------
-
-             IMPORTANT:
-             pending_cs_verification does NOT belong here.
-
-             Job starts as:
-                 in_progress
-          */
-
-          const [job] =
-            await tx
-              .insert(jobs)
-              .values({
-                id: jobId,
-
-                jobNumber,
-
-                customerId,
-
-                currentStatus:
-                  'in_progress',
-              })
-              .returning();
+    if (!Array.isArray(items) || items.length === 0) { return res.status(400).json({ error: 'At least one job item is required', }); }
+    
+    const jobId =crypto.randomUUID();
+    const jobNumber =generateJobNumber();
 
 
-          /* ---------------------------------------------------
-             Create individual JOB ITEM
-             ---------------------------------------------------
+    const result = await db.transaction(async (tx)=>{
+      const [job]= await tx.insert(jobs).values({id:jobId,jobNumber,customerId,currentStatus:'in_progress',}).returning();
 
-             The detailed workflow starts here:
-                 pending_cs_verification
-          */
-
-          const [jobItem] =
-            await tx
-              .insert(jobItems)
-              .values({
-                id: jobItemId,
-
-                jobId,
-
-                deviceCategory,
-
-                issueDescription,
-
-                currentStatus:
-                  'pending_cs_verification',
-              })
-              .returning();
-
-
-          /* ---------------------------------------------------
-             Customer comment is optional.
-             ---------------------------------------------------
-
-             This is a normal customer comment, not a mandatory
-             workflow-action comment.
-          */
-
-          if (comment?.trim()) {
-            await tx
-              .insert(jobComments)
-              .values({
-                jobItemId,
-
-                userId:
-                  customerId,
-
-                comment:
-                  comment.trim(),
-              });
-          }
-
-
-          return {
-            job,
-            jobItem,
-          };
-        },
-
-        customerId,
-
-        /*
-         * The status-transition helper requires a note.
-         *
-         * Since this is customer-created initial workflow,
-         * use a system-style workflow note rather than the
-         * optional customer comment.
-         */
-        'Repair request created by customer.',
-      );
-
-
-    return res.status(201).json({
-      message:
-        'Repair request submitted successfully. It is awaiting CS verification.',
-
-      job:
-        result.job,
-
-      jobItem:
-        result.jobItem,
+      const jobItemsToInsert = items.map((item) => ({
+        id: crypto.randomUUID(),
+        jobId,
+        deviceCategory: item.deviceCategory,
+        deviceSerialNumber: item.deviceSerialNumber,
+        issueDescription: item.issueDescription,
+        currentStatus: 'pending_cs_verification' as const,
+      }));      
+      const createdJobItems = await tx .insert(jobItems) .values(jobItemsToInsert) .returning();
+      if (comment?.trim()) { await tx .insert(jobComments) .values({ jobId, userId: customerId, comment: comment.trim(), }); }
+      return { job, jobItems: createdJobItems, };
     });
+
+
+    return res.status(201).json({ message: 'Repair request submitted successfully. It is awaiting CS verification.', job: result.job, jobItems: result.jobItems, });
   } catch (error) {
-    console.error(
-      'Customer Job Creation Error:',
-      error,
-    );
+    console.error('Customer Job Creation Error:',error,);
 
-    return res.status(500).json({
-      error:
-        'Internal server error while creating repair request',
-    });
+    return res.status(500).json({error:'Internal server error while creating repair request',});
   }
 };
 
@@ -262,29 +79,14 @@ export const createCustomerJob = async (
  *
  * Only the JOB ITEM changes status.
  */
-export const respondToQuote = async (
-  req: Request<
-    {},
-    {},
-    QuoteResponseInput
-  >,
-  res: Response,
-) => {
+export const respondToQuote = async (req: Request<{},{},QuoteResponseInput>,res: Response,) => {
   try {
-    const {
-      jobItemId,
-      decision,
-      comment,
-    } = req.body;
+    const {jobItemId,decision,comment,} = req.body;
 
-    const userId =
-      req.user?.userId;
+    const userId =req.user?.userId;
 
     if (!userId) {
-      return res.status(401).json({
-        error:
-          'Authentication required',
-      });
+      return res.status(401).json({error:'Authentication required',});
     }
 
 
@@ -294,32 +96,17 @@ export const respondToQuote = async (
 
     const [jobItem] =
       await db
-        .select({
-          id: jobItems.id,
-
-          jobId:
-            jobItems.jobId,
-
-          currentStatus:
-            jobItems.currentStatus,
-
-          isFinalQuoteApproved:
-            jobItems.isFinalQuoteApproved,
+        .select({id: jobItems.id,
+          jobId:jobItems.jobId,
+          currentStatus:jobItems.currentStatus,
+          isFinalQuoteApproved:jobItems.isFinalQuoteApproved,
         })
         .from(jobItems)
-        .where(
-          eq(
-            jobItems.id,
-            jobItemId,
-          ),
-        )
+        .where(eq(jobItems.id,jobItemId,),)
         .limit(1);
 
     if (!jobItem) {
-      return res.status(404).json({
-        error:
-          'Job item not found',
-      });
+      return res.status(404).json({error:'Job item not found',});
     }
 
 
@@ -329,26 +116,14 @@ export const respondToQuote = async (
 
     const [job] =
       await db
-        .select({
-          id: jobs.id,
-
-          customerId:
-            jobs.customerId,
-        })
+        .select({id: jobs.id,customerId:jobs.customerId,})
         .from(jobs)
         .where(
-          eq(
-            jobs.id,
-            jobItem.jobId,
-          ),
-        )
+          eq(jobs.id,jobItem.jobId))
         .limit(1);
 
     if (!job) {
-      return res.status(404).json({
-        error:
-          'Job not found',
-      });
+      return res.status(404).json({error:'Job not found',});
     }
 
 
@@ -356,8 +131,7 @@ export const respondToQuote = async (
        Verify customer ownership
        --------------------------------------------------------- */
 
-    const roles =
-      req.user?.roles ?? [];
+    const roles =req.user?.roles ?? [];
 
     /*
      * Admin/employee users may be allowed through the route
@@ -365,14 +139,8 @@ export const respondToQuote = async (
      *
      * A normal customer can only respond to their own job.
      */
-    if (
-      roles.includes('customer') &&
-      job.customerId !== userId
-    ) {
-      return res.status(403).json({
-        error:
-          'You can only respond to quotes for your own jobs',
-      });
+    if (roles.includes('customer') &&job.customerId !== userId) {
+      return res.status(403).json({error:'You can only respond to quotes for your own jobs'});
     }
 
 
@@ -380,14 +148,8 @@ export const respondToQuote = async (
        Validate current item status
        --------------------------------------------------------- */
 
-    if (
-      jobItem.currentStatus !==
-      'awaiting_customer_approval'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot respond to quote. Job item is currently in '${jobItem.currentStatus}' state.`,
-      });
+    if (jobItem.currentStatus !=='awaiting_customer_approval') {
+      return res.status(400).json({error:`Cannot respond to quote. Job item is currently in '${jobItem.currentStatus}' state.`});
     }
 
 
@@ -395,10 +157,7 @@ export const respondToQuote = async (
        Determine new item status
        --------------------------------------------------------- */
 
-    const newStatus =
-      decision === 'accept'
-        ? 'repair_authorized'
-        : 'repair_rejected';
+    const newStatus =decision === 'accept'? 'repair_authorized': 'repair_rejected';
 
 
     /**
@@ -424,33 +183,15 @@ export const respondToQuote = async (
        --------------------------------------------------------- */
 
     const updatedJobItem =
-      await updateJobItemWithStatusTransition(
-        jobItem.id,
-
-        jobItem.currentStatus,
-
-        newStatus,
-
+      await updateJobItemWithStatusTransition(jobItem.id,jobItem.currentStatus,newStatus,
         async (tx) => {
           const [result] =
-            await tx
-              .update(jobItems)
-              .set({
-                currentStatus:
-                  newStatus,
-
-                isFinalQuoteApproved:
-                  decision === 'accept',
-
-                updatedAt:
-                  new Date(),
+            await tx.update(jobItems)
+              .set({currentStatus:newStatus,
+                isFinalQuoteApproved:decision === 'accept',
+                updatedAt:new Date(),
               })
-              .where(
-                eq(
-                  jobItems.id,
-                  jobItem.id,
-                ),
-              )
+              .where(eq(jobItems.id,jobItem.id,),)
               .returning();
 
 
@@ -461,21 +202,10 @@ export const respondToQuote = async (
           if (comment?.trim()) {
             await tx
               .insert(jobComments)
-              .values({
-                jobItemId:
-                  jobItem.id,
-
-                userId,
-
-                comment:
-                  comment.trim(),
-              });
+              .values({jobItemId:jobItem.id,userId,comment:comment.trim()});
           }
-
-
           return result;
         },
-
         userId,
 
         /*
@@ -484,30 +214,15 @@ export const respondToQuote = async (
          * The helper stores this in job_comments and
          * job_item_status_history.
          */
-        decision === 'accept'
-          ? 'Customer approved the final quote.'
-          : 'Customer rejected the final quote.',
-      );
+        decision === 'accept'? 'Customer approved the final quote.': 'Customer rejected the final quote.');
 
 
     return res.status(200).json({
-      message:
-        decision === 'accept'
-          ? 'Quote accepted successfully. Repair is now authorized.'
-          : 'Quote rejected successfully.',
-
-      jobItem:
-        updatedJobItem,
+      message:decision === 'accept'? 'Quote accepted successfully. Repair is now authorized.': 'Quote rejected successfully.',
+      jobItem:updatedJobItem,
     });
-  } catch (error) {
-    console.error(
-      'Quote response error:',
-      error,
-    );
+  } catch (error) {console.error('Quote response error:',error,);
 
-    return res.status(500).json({
-      error:
-        'Internal server error while responding to quote',
-    });
+    return res.status(500).json({error:'Internal server error while responding to quote',});
   }
 };

@@ -11,9 +11,7 @@ import { users } from './users.js';
 import { jobs } from './jobs.js';
 import { jobItems } from './job-items.js';
 
-export const jobComments = pgTable(
-  'job_comments',
-  {
+export const jobComments = pgTable('job_comments',{
     id: uuid('id').defaultRandom().primaryKey(),
 
     jobId: uuid('job_id').references(() => jobs.id),

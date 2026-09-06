@@ -26,7 +26,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
 
     // Fetch the user's specific system roles from the database junction table
     const userRoleRows = await db
-      .select({ roleName: roles.name })
+.select({ roleName: roles.name })
       .from(userRoles)
       .innerJoin(roles, eq(userRoles.roleId, roles.id))
       .where(eq(userRoles.userId, payload.userId));

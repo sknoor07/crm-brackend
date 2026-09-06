@@ -54,18 +54,17 @@ export const registerEmployee = async (req: Request<{}, {}, RegisterEmployeeInpu
     } = req.body;
 
     // 2. Check if the email is already in use
-    const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    let existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (existingUser.length > 0) {
       return res.status(400).json({ error: 'Email is already registered' });
+    }else if (phone && phone.length > 0) {
+      existingUser = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
+      if (existingUser.length > 0) {
+        return res.status(400).json({ error: 'Phone number is already registered' });
+      }
     }
 
-    const selectedRoles = await db
-      .select({
-        id: roles.id,
-        name: roles.name,
-      })
-      .from(roles)
-      .where(inArray(roles.id, roleIds));
+    const selectedRoles = await db.select({id: roles.id, name: roles.name}).from(roles).where(inArray(roles.id, roleIds));
 
     if (selectedRoles.length !== roleIds.length) {
       return res.status(400).json({
@@ -82,62 +81,21 @@ export const registerEmployee = async (req: Request<{}, {}, RegisterEmployeeInpu
     const result = await db.transaction(async (tx) => {
 
       // Create employee user
-      const [newUser] = await tx
-        .insert(users)
-        .values({
-          email,
-          passwordHash: null,
-          userType: 'employee',
-          phone,
-          isActive: true,
-          mustChangePassword: true,
-        })
-        .returning({
-          id: users.id,
-          email: users.email,
-        });
+      const [newUser] = await tx.insert(users)
+      .values({ email, passwordHash: null, userType: 'employee', phone, isActive: true, mustChangePassword: true })
+      .returning({ id: users.id, email: users.email });
 
       // Create employee profile
-      await tx
-        .insert(employeeProfiles)
-        .values({
-          userId: newUser.id,
-          firstName,
-          lastName,
-          phone,
-          dateOfBirth,
-          aadhaarNumber,
-          panNumber,
-          uanNumber,
-          currentAddress,
-          permanentAddress,
-          bankAccountNumber,
-          bankIfscCode,
-          bankName,
-          emergencyContactName,
-          emergencyContactPhone,
-          specializations,
-        });
+      await tx.insert(employeeProfiles)
+        .values({ userId: newUser.id, firstName, lastName, phone, dateOfBirth, aadhaarNumber, panNumber, uanNumber, currentAddress, permanentAddress, bankAccountNumber, bankIfscCode, bankName, emergencyContactName, emergencyContactPhone, specializations });
 
       // Assign roles
-      await tx
-        .insert(userRoles)
-        .values(
-          roleIds.map((roleId: string) => ({
-            userId: newUser.id,
-            roleId,
-            assignedBy: req.user!.userId,
-          }))
-        );
+      await tx.insert(userRoles)
+        .values(roleIds.map((roleId: string) => ({ userId: newUser.id, roleId, assignedBy: req.user!.userId })));
 
       // Create invitation
-      await tx
-        .insert(accountInvitations)
-        .values({
-          userId: newUser.id,
-          tokenHash,
-          expiresAt,
-        });
+      await tx.insert(accountInvitations)
+        .values({ userId: newUser.id, tokenHash, expiresAt });
 
       return newUser;
     });
@@ -175,10 +133,7 @@ export const loginUser = async (req: Request<{}, {}, LoginInput>, res: Response)
       });
     }
 
-    const userRoleRows = await db
-      .select({
-        roleName: roles.name,
-      })
+    const userRoleRows = await db.select({roleName: roles.name,})
       .from(userRoles)
       .innerJoin(roles, eq(userRoles.roleId, roles.id))
       .where(eq(userRoles.userId, user.id));

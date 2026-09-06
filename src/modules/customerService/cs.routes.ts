@@ -10,7 +10,6 @@ import {
 } from '../../shared/middleware/validateRequest.js';
 
 import {
-  approveJobItemByCS,
   rejectJobItemByCS,
   generateFinalQuote,
   getPendingFinalQuotes,
@@ -19,6 +18,7 @@ import {
   closeJobRequest,
   getPendingOnsiteConfirmations,
   confirmOnsiteRepair,
+  approveJobByCS,
 } from './cs.controller.js';
 
 import {
@@ -27,7 +27,9 @@ import {
   generateFinalQuoteSchema,
   closeJobSchema,
   confirmOnsiteRepairSchema,
+  csApproveJobAndJobItemSchema,
 } from './cs.validation.js';
+
 
 const router = Router();
 
@@ -42,9 +44,9 @@ router.patch(
   '/approve-item',
   requireRole(csRoles),
   validateRequest(
-    csApproveJobItemSchema,
+    csApproveJobAndJobItemSchema,
   ),
-  approveJobItemByCS,
+  approveJobByCS,
 );
 
 router.patch(

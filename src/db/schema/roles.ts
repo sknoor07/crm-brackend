@@ -10,14 +10,11 @@ import {
 export const roles = pgTable('roles', {
   id: uuid('id').defaultRandom().primaryKey(),
 
-  name: varchar('name', {
-    length: 50,
-  }).notNull().unique(),
+  name: varchar('name', {length: 50,}).notNull().unique(),
 
   description: text('description'),
 
   permissions: jsonb('permissions'),
 
-  createdAt: timestamp('created_at')
-    .defaultNow(),
+  createdAt: timestamp('created_at').defaultNow(),
 });
