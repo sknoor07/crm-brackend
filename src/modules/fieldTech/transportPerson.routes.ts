@@ -2,8 +2,6 @@ import { Router } from 'express';
 
 import {
   getAssignedJobs,
-  startTransportJob,
-  getItemsForInspection,
   inspectJobItem,
   sendItemToLab,
   requestFinalQuote,
@@ -13,6 +11,9 @@ import {
   getAssignedDeliveryJobs,
   startDelivery,
   deliverItem,
+  startTransportJobVisit,
+  finishOnsiteRepair,
+  sendJobforInspectionAtLab,
 } from './transportPerson.controller.js';
 
 import {
@@ -22,10 +23,10 @@ import {
   sendItemToLabSchema,
   requestFinalQuoteSchema,
   rejectJobItemSchema,
-  startOnsiteRepairSchema,
   completeOnsiteRepairSchema,
   startDeliverySchema,
   deliverItemSchema,
+  startAndFinishOnsiteRepairSchema,
 } from './transportPerson.validation.js';
 
 import {
@@ -70,22 +71,22 @@ router.patch(
   '/start',
   requireRole(transportRoles),
   validateRequest(startTransportJobSchema),
-  startTransportJob,
-);
-
-router.get(
-  '/:jobId/items',
-  requireRole(transportRoles),
-  validateRequest(jobIdParamsSchema, 'params'),
-  getItemsForInspection,
+  startTransportJobVisit,
 );
 
 router.patch(
-  '/inspect-item',
+  '/:jobId/send-job-to-lab',
   requireRole(transportRoles),
-  validateRequest(inspectJobItemSchema),
-  inspectJobItem,
+  validateRequest(jobIdParamsSchema, 'params'),
+  sendJobforInspectionAtLab
 );
+
+// router.patch(
+//   '/inspect-item',
+//   requireRole(transportRoles),
+//   validateRequest(inspectJobItemSchema),
+//   inspectJobItem,
+// );
 
 router.patch(
   '/send-item-to-lab',
@@ -118,8 +119,14 @@ router.patch(
 router.patch(
   '/start-repair',
   requireRole(transportRoles),
-  validateRequest(startOnsiteRepairSchema),
+  validateRequest(startAndFinishOnsiteRepairSchema),
   startOnsiteRepair,
+);
+router.patch(
+  '/finish-repair',
+  requireRole(transportRoles),
+  validateRequest(startAndFinishOnsiteRepairSchema),
+  finishOnsiteRepair,
 );
 
 router.patch(

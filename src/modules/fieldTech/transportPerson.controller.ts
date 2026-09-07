@@ -13,6 +13,7 @@ import {
   jobItems,
   jobComments,
   jobItemStatusHistory,
+  customerProfiles,
 } from '../../db/schema/index.js';
 
 import {
@@ -21,8 +22,11 @@ import {
 
 import type {
   JobItemStatus,
+  JobSummaryStatus,
 } from '../../db/schema/job-status.js';
 import { DeliverItemInput, StartDeliveryInput } from './transportPerson.validation.js';
+import { allowedJobTransitions } from '../jobs/status-history.js';
+import { date } from 'zod';
 
 
 type DbTransaction = Parameters<
@@ -34,7 +38,7 @@ type DbTransaction = Parameters<
  * Returns the authenticated user's ID.
  */
 const getUserId = (req: Request): string => {
-  if (!req.user?.userId) {
+  if (!req.user?.userId || !req.user.roles?.includes('transport_team_person')) {
     throw new Error('Authenticated user ID is missing');
   }
 
@@ -83,26 +87,64 @@ const getJobItem = async (
  *
  * Shows jobs assigned to this Transport Person.
  */
-export const getAssignedJobs = async (
-  req: Request,
-  res: Response,
-) => {
+export const getAssignedJobs = async (req: Request, res: Response,) => {
   try {
     const transportPersonId = getUserId(req);
 
-    const assignedJobs = await db
-      .select()
+    const rawResults = await db.select({
+      job: jobs,
+      jobItem: jobItems,
+      customerProfile: customerProfiles
+    })
       .from(jobs)
+      .innerJoin(jobItems, eq(jobItems.jobId, jobs.id))
+      // Use leftJoin so jobs still load even if a customer profile is missing
+      .leftJoin(customerProfiles, eq(jobs.customerId, customerProfiles.userId))
       .where(
-        eq(
-          jobs.assignedTransportTeamPersonId,
-          transportPersonId,
-        ),
+        and(
+          eq(jobs.assignedTransportTeamPersonId, transportPersonId,),
+          eq(jobs.currentStatus, 'in_progress'),
+          //eq(jobItems.currentStatus, 'approved_for_transport'),
+        )
+
       )
       .orderBy(desc(jobs.createdAt));
+    // const assignedJobs = await db
+    //   .select()
+    //   .from(jobs)
+    //   .where(
+    //     eq(
+    //       jobs.assignedTransportTeamPersonId,
+    //       transportPersonId,
+    //     ),
+    //   )
+    //   .orderBy(desc(jobs.createdAt));
+
+    const jobsMap = new Map();
+
+    for (const row of rawResults) {
+      const jobId = row.job.id;
+
+      if (!jobsMap.has(jobId)) {
+        // Initialize the job the first time we see this ID
+        jobsMap.set(jobId, {
+          job: row.job,
+          customer: row.customerProfile, // Mount customer directly onto the job wrapper
+          jobItems: []
+        });
+      }
+
+      // Add the current device/item to the jobItems array
+      if (row.jobItem) {
+        jobsMap.get(jobId).jobItems.push(row.jobItem);
+      }
+    }
+
+    // Convert the Map back to a clean array
+    const groupedJobs = Array.from(jobsMap.values());
 
     return res.status(200).json({
-      jobs: assignedJobs,
+      jobs: groupedJobs,
     });
   } catch (error) {
     console.error(
@@ -116,17 +158,330 @@ export const getAssignedJobs = async (
   }
 };
 
+/**
+transport person starts the transport visit for a job.
+*/
+
+export const startTransportJobVisit = async (req: Request, res: Response,) => {
+  try {
+    const transportPersonId = getUserId(req);
+    const { jobId, comment } = req.body;
+
+    return await db.transaction(async (tx) => {
+      // 1. Fetch and validate the job
+      const [job] = await tx
+        .select()
+        .from(jobs)
+        .where(eq(jobs.id, jobId))
+        .limit(1);
+
+      if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+      }
+
+      if (!isAuthorizedForJob(job, transportPersonId, req.user?.roles)) {
+        return res.status(403).json({ error: 'You are not assigned to this job.' });
+      }
+
+      if (job.currentStatus !== 'in_progress') {
+        return res.status(400).json({
+          error: `Cannot start transport visit for job with status '${job.currentStatus}'.`,
+        });
+      }
+
+      // 2. Update the parent job
+      const [updatedJob] = await tx
+        .update(jobs)
+        .set({ updatedAt: new Date() })
+        .where(eq(jobs.id, jobId))
+        .returning();
+
+      // 3. Fetch the specific items we need to transition
+      const itemsToUpdate = await tx
+        .select()
+        .from(jobItems)
+        .where(
+          and(
+            eq(jobItems.jobId, jobId),
+            eq(jobItems.currentStatus, 'approved_for_transport')
+          )
+        );
+
+      // 4. Update each item using your status transition tracker
+      for (const item of itemsToUpdate) {
+        // IMPORTANT: Change 'transport_inspection' to match your allowed transitions map if needed
+        const newStatus: JobItemStatus = 'transport_visit_in_progress';
+
+        await updateJobItemWithStatusTransition(
+          item.id,
+          item.currentStatus as JobItemStatus,
+          newStatus,
+          async (dbTx) => {
+            const [updated] = await dbTx
+              .update(jobItems)
+              .set({ currentStatus: newStatus, updatedAt: new Date() })
+              .where(eq(jobItems.id, item.id))
+              .returning();
+            return updated;
+          },
+          transportPersonId,
+          comment || 'Started transport visit',
+          tx // <-- Pass the parent transaction here
+        );
+      }
+
+      return res.status(200).json({
+        message: 'Customer visit has been started.',
+        job: updatedJob
+      });
+
+    });
+  } catch (error: any) {
+    console.error('Start transport job error:', error);
+
+    // Catch the specific transition error to send a helpful response
+    if (error.message.includes('Invalid job item status transition')) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
 /**
- * START CUSTOMER VISIT
- *
- * Job-level operation.
- *
- * pending_transport_team_person
- *          ↓
- * transport_team_person_working
+  * START ONSITE REPAIR fo an Item
  */
-export const startTransportJob = async (
+export const startOnsiteRepair = async (req: Request, res: Response,) => {
+  try {
+    const transportPersonId = getUserId(req);
+
+    const { jobItemId, comment, } = req.body;
+
+    const item = await getJobItem(jobItemId);
+
+    if (!item) {
+      return res.status(404).json({ error: 'Job item not found', });
+    }
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, item.jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({ error: 'Parent job not found', });
+    }
+
+    if (!isAuthorizedForJob(job, transportPersonId, req.user?.roles,)) {
+      return res.status(403).json({ error: 'You are not assigned to this job.', });
+    }
+
+    if (item.repairLocation !== 'customer_site') {
+      return res.status(400).json({ error: 'This item is not configured for onsite repair.', });
+    }
+
+    if (item.currentStatus !== 'transport_visit_in_progress') {
+      return res.status(400).json({ error: `Repair cannot start from status '${item.currentStatus}'. Customer approval is required first.`, });
+    }
+
+    const updatedItem =
+      await updateJobItemWithStatusTransition(
+        item.id,
+        item.currentStatus,
+        'repair_in_progress',
+        async (tx) => {
+          const [result] = await tx
+            .update(jobItems)
+            .set({ currentStatus: 'repair_in_progress', updatedAt: new Date(), })
+            .where(eq(jobItems.id, jobItemId))
+            .returning();
+
+          await tx.insert(jobComments).values({ jobItemId, userId: transportPersonId, comment, });
+
+          return result;
+        },
+        transportPersonId,
+        comment,
+      );
+
+    return res.status(200).json({
+      message: 'Onsite repair has started.',
+      item: updatedItem,
+    });
+  } catch (error) {
+    console.error(
+      'Start onsite repair error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+/**
+  * FINISH ONSITE REPAIR fo an Item
+ */
+export const finishOnsiteRepair = async (req: Request, res: Response,) => {
+  try {
+    const transportPersonId = getUserId(req);
+
+    const { jobItemId, comment, } = req.body;
+
+    const item = await getJobItem(jobItemId);
+
+    if (!item) {
+      return res.status(404).json({ error: 'Job item not found', });
+    }
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, item.jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({ error: 'Parent job not found', });
+    }
+
+    if (!isAuthorizedForJob(job, transportPersonId, req.user?.roles,)) {
+      return res.status(403).json({ error: 'You are not assigned to this job.', });
+    }
+
+    if (item.repairLocation !== 'customer_site') {
+      return res.status(400).json({ error: 'This item is not configured for onsite repair.', });
+    }
+
+    if (item.currentStatus !== 'repair_in_progress' && item.currentStatus === 'repair_rejected') {
+      return res.status(400).json({ error: `Repair cannot start from status '${item.currentStatus}'. Customer approval is required first.`, });
+    }
+    if (item.currentStatus === 'repair_finished') {
+      return res.status(400).json({ error: `Repair Already Completed '${item.currentStatus}'.`, });
+    }
+
+    const updatedItem =
+      await updateJobItemWithStatusTransition(
+        item.id,
+        item.currentStatus,
+        'repair_finished',
+        async (tx) => {
+          const [result] = await tx
+            .update(jobItems)
+            .set({ currentStatus: 'repair_finished', updatedAt: new Date(), })
+            .where(eq(jobItems.id, jobItemId))
+            .returning();
+
+          await tx.insert(jobComments).values({ jobItemId, userId: transportPersonId, comment, });
+
+          return result;
+        },
+        transportPersonId,
+        comment,
+      );
+
+    return res.status(200).json({
+      message: `Onsite repair finished for item ${item.deviceCategory}.`,
+      item: updatedItem,
+    });
+  } catch (error) {
+    console.error(
+      'Finish onsite repair error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+/**
+ complete all job order and send for final quote
+ */
+export const completeOnsiteRepair = async (req: Request, res: Response,) => {
+  try {
+    const transportPersonId = getUserId(req);
+
+    const { jobId, comment, } = req.body;
+
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
+
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found or already finished.', });
+    }
+
+    if (!isAuthorizedForJob(job, transportPersonId, req.user?.roles,)) {
+      return res.status(403).json({ error: 'You are not assigned to this job.', });
+    }
+    const newStatus: JobSummaryStatus = 'pending_final_quote_onsite';
+    const transitionKey = job.currentStatus;
+    if (!allowedJobTransitions[transitionKey]?.includes(newStatus)) {
+      return res.status(403).json({ error: `Invalid job item status transition: ${transitionKey} -> ${newStatus}`, });
+    }
+
+
+    const jobItem = await db.select().from(jobItems).where(eq(jobItems.jobId, jobId));
+
+    jobItem.forEach(async (item) => {
+      if (item.currentStatus !== 'repair_finished' && item.currentStatus !== 'repair_rejected') {
+        return res.status(400).json({ error: `Cannot Finish Onsite Repair Please finish for item ${item.deviceCategory} with status '${item.currentStatus}'.`, });
+      }
+    });
+
+    const updatedJob = await db.update(jobs).set({ currentStatus: newStatus, updatedAt: new Date(), }).where(eq(jobs.id, jobId)).returning();
+    const insertedComment = await db.insert(jobComments).values({ jobId, userId: transportPersonId, comment, }).returning();
+
+    return res.status(200).json({
+      message:
+        'Onsite repair completed. CS team has been notified for final Quote Creation.',
+      item: updatedJob,
+      comment: insertedComment,
+    });
+  } catch (error) {
+    console.error('Complete onsite repair error:', error);
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+/**
+ * GET ITEMS FOR INSPECTION
+ */
+export const sendJobforInspectionAtLab = async (req: Request, res: Response,) => {
+  try {
+    const jobId = Array.isArray(req.params.jobId) ? req.params.jobId[0] : req.params.jobId;
+
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
+
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found', });
+    }
+
+    const items = await db.select().from(jobItems).where(eq(jobItems.jobId, jobId)).orderBy(asc(jobItems.createdAt));
+
+    const hasPendingLabReceipt = items.some(
+      (item) => item.currentStatus === 'pending_lab_receipt'
+    );
+
+    if (!hasPendingLabReceipt) {
+      throw new Error('Please mark atleast one item to send to lab');
+    }
+
+    await db.update(jobs).set({currentStatus:"going_to_lab",updatedAt: new Date()})
+    return res.status(200).json({job,items,});
+  } catch (error) {
+    console.error('send job to lab error :',error,);
+
+    return res.status(500).json({error: 'Internal server error',});
+  }
+};
+
+
+export const rejectJobItem = async (
   req: Request,
   res: Response,
 ) => {
@@ -134,19 +489,27 @@ export const startTransportJob = async (
     const transportPersonId = getUserId(req);
 
     const {
-      jobId,
+      jobItemId,
       comment,
     } = req.body;
+
+    const item = await getJobItem(jobItemId);
+
+    if (!item) {
+      return res.status(404).json({
+        error: 'Job item not found',
+      });
+    }
 
     const [job] = await db
       .select()
       .from(jobs)
-      .where(eq(jobs.id, jobId))
+      .where(eq(jobs.id, item.jobId))
       .limit(1);
 
     if (!job) {
       return res.status(404).json({
-        error: 'Job not found',
+        error: 'Parent job not found',
       });
     }
 
@@ -162,34 +525,51 @@ export const startTransportJob = async (
       });
     }
 
-    if (job.currentStatus !== 'in_progress') {
+    if (
+      item.currentStatus !==
+      'transport_visit_in_progress'
+    ) {
       return res.status(400).json({
         error:
-          `Cannot start transport visit for job with status '${job.currentStatus}'.`,
+          `Cannot reject item from status '${item.currentStatus}'.`,
       });
     }
 
-    const [updatedJob] = await db
-      .update(jobs)
-      .set({
-        updatedAt: new Date(),
-      })
-      .where(eq(jobs.id, jobId))
-      .returning();
+    const updatedItem =
+      await updateJobItemWithStatusTransition(
+        item.id,
+        item.currentStatus,
+        'repair_rejected',
+        async (tx) => {
+          const [result] = await tx
+            .update(jobItems)
+            .set({
+              currentStatus: 'repair_rejected',
+              updatedAt: new Date(),
+            })
+            .where(eq(jobItems.id, jobItemId))
+            .returning();
 
-    await db.insert(jobComments).values({
-      jobId,
-      userId: transportPersonId,
-      comment,
-    });
+          await tx.insert(jobComments).values({
+            jobItemId,
+            userId: transportPersonId,
+            comment,
+          });
+
+          return result;
+        },
+        transportPersonId,
+        comment,
+      );
 
     return res.status(200).json({
-      message: 'Customer visit has been started.',
-      job: updatedJob,
+      message:
+        'Item has been rejected.',
+      item: updatedItem,
     });
   } catch (error) {
     console.error(
-      'Start transport job error:',
+      'Reject job item error:',
       error,
     );
 
@@ -201,55 +581,82 @@ export const startTransportJob = async (
 
 
 /**
- * GET ITEMS FOR INSPECTION
+ * SEND ITEM TO LAB
+ *
+ * transport_inspection
+ *          ↓
+ * pending_lab_receipt
  */
-export const getItemsForInspection = async (
-  req: Request,
-  res: Response,
-) => {
+export const sendItemToLab = async (req: Request,res: Response,) => {
   try {
     const transportPersonId = getUserId(req);
-    const jobId = Array.isArray(req.params.jobId)
-      ? req.params.jobId[0]
-      : req.params.jobId;
+
+    const {jobItemId,comment,} = req.body;
+
+    const item = await getJobItem(jobItemId);
+
+    if (!item) {
+      return res.status(404).json({error: 'Job item not found',});
+    }
 
     const [job] = await db
       .select()
       .from(jobs)
-      .where(eq(jobs.id, jobId))
+      .where(eq(jobs.id, item.jobId))
       .limit(1);
 
     if (!job) {
-      return res.status(404).json({
-        error: 'Job not found',
+      return res.status(404).json({error: 'Parent job not found',});
+    }
+
+    if (!isAuthorizedForJob(job,transportPersonId,req.user?.roles,)) {
+      return res.status(403).json({error: 'You are not assigned to this job.',});
+    }
+
+    if (item.currentStatus !=='transport_visit_in_progress') {
+      return res.status(400).json({
+        error:
+          `Cannot send item to lab from status '${item.currentStatus}'.`,
       });
     }
 
-    if (
-      !isAuthorizedForJob(
-        job,
+    const updatedItem =
+      await updateJobItemWithStatusTransition(
+        item.id,
+        item.currentStatus,
+        'pending_lab_receipt',
+        async (tx) => {
+          const [result] = await tx
+            .update(jobItems)
+            .set({
+              repairLocation: 'lab',
+              currentStatus:
+                'pending_lab_receipt',
+              updatedAt: new Date(),
+            })
+            .where(eq(jobItems.id, jobItemId))
+            .returning();
+
+          await tx.insert(jobComments).values({
+            jobItemId,
+            userId: transportPersonId,
+            comment,
+          });
+
+          return result;
+        },
         transportPersonId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error: 'You are not assigned to this job.',
-      });
-    }
-
-    const items = await db
-      .select()
-      .from(jobItems)
-      .where(eq(jobItems.jobId, jobId))
-      .orderBy(asc(jobItems.createdAt));
+        comment,
+      );
 
     return res.status(200).json({
-      jobId,
-      items,
+      message:
+        'Item has been sent to the lab.',
+      item: updatedItem,
     });
   } catch (error) {
     console.error(
-      'Get transport job items error:',
+      'Send item to lab error:',
       error,
     );
 
@@ -267,10 +674,7 @@ export const getItemsForInspection = async (
  *          ↓
  * transport_inspection
  */
-export const inspectJobItem = async (
-  req: Request,
-  res: Response,
-) => {
+export const inspectJobItem = async (req: Request,res: Response) => {
   try {
     const transportPersonId = getUserId(req);
 
@@ -367,112 +771,7 @@ export const inspectJobItem = async (
 };
 
 
-/**
- * SEND ITEM TO LAB
- *
- * transport_inspection
- *          ↓
- * pending_lab_receipt
- */
-export const sendItemToLab = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const transportPersonId = getUserId(req);
 
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
-
-    const item = await getJobItem(jobItemId);
-
-    if (!item) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
-
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, item.jobId))
-      .limit(1);
-
-    if (!job) {
-      return res.status(404).json({
-        error: 'Parent job not found',
-      });
-    }
-
-    if (
-      !isAuthorizedForJob(
-        job,
-        transportPersonId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error: 'You are not assigned to this job.',
-      });
-    }
-
-    if (
-      item.currentStatus !==
-      'transport_inspection'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot send item to lab from status '${item.currentStatus}'.`,
-      });
-    }
-
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'pending_lab_receipt',
-        async (tx) => {
-          const [result] = await tx
-            .update(jobItems)
-            .set({
-              repairLocation: 'lab',
-              currentStatus:
-                'pending_lab_receipt',
-              updatedAt: new Date(),
-            })
-            .where(eq(jobItems.id, jobItemId))
-            .returning();
-
-          await tx.insert(jobComments).values({
-            jobItemId,
-            userId: transportPersonId,
-            comment,
-          });
-
-          return result;
-        },
-        transportPersonId,
-        comment,
-      );
-
-    return res.status(200).json({
-      message:
-        'Item has been sent to the lab.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Send item to lab error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
 
 
 /**
@@ -606,333 +905,12 @@ export const requestFinalQuote = async (
  *          ↓
  * repair_rejected
  */
-export const rejectJobItem = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const transportPersonId = getUserId(req);
-
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
-
-    const item = await getJobItem(jobItemId);
-
-    if (!item) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
-
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, item.jobId))
-      .limit(1);
-
-    if (!job) {
-      return res.status(404).json({
-        error: 'Parent job not found',
-      });
-    }
-
-    if (
-      !isAuthorizedForJob(
-        job,
-        transportPersonId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error: 'You are not assigned to this job.',
-      });
-    }
-
-    if (
-      item.currentStatus !==
-      'transport_inspection'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot reject item from status '${item.currentStatus}'.`,
-      });
-    }
-
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'repair_rejected',
-        async (tx) => {
-          const [result] = await tx
-            .update(jobItems)
-            .set({
-              currentStatus: 'repair_rejected',
-              updatedAt: new Date(),
-            })
-            .where(eq(jobItems.id, jobItemId))
-            .returning();
-
-          await tx.insert(jobComments).values({
-            jobItemId,
-            userId: transportPersonId,
-            comment,
-          });
-
-          return result;
-        },
-        transportPersonId,
-        comment,
-      );
-
-    return res.status(200).json({
-      message:
-        'Item has been rejected.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Reject job item error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
 
 
-/**
- * START ONSITE REPAIR
- *
- * Customer has already approved the quote.
- *
- * repair_authorized
- *          ↓
- * repair_in_progress
- */
-export const startOnsiteRepair = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const transportPersonId = getUserId(req);
-
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
-
-    const item = await getJobItem(jobItemId);
-
-    if (!item) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
-
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, item.jobId))
-      .limit(1);
-
-    if (!job) {
-      return res.status(404).json({
-        error: 'Parent job not found',
-      });
-    }
-
-    if (
-      !isAuthorizedForJob(
-        job,
-        transportPersonId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error: 'You are not assigned to this job.',
-      });
-    }
-
-    if (item.repairLocation !== 'customer_site') {
-      return res.status(400).json({
-        error:
-          'This item is not configured for onsite repair.',
-      });
-    }
-
-    if (
-      item.currentStatus !==
-      'repair_authorized'
-    ) {
-      return res.status(400).json({
-        error:
-          `Repair cannot start from status '${item.currentStatus}'. Customer approval is required first.`,
-      });
-    }
-
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'repair_in_progress',
-        async (tx) => {
-          const [result] = await tx
-            .update(jobItems)
-            .set({
-              currentStatus:
-                'repair_in_progress',
-              updatedAt: new Date(),
-            })
-            .where(eq(jobItems.id, jobItemId))
-            .returning();
-
-          await tx.insert(jobComments).values({
-            jobItemId,
-            userId: transportPersonId,
-            comment,
-          });
-
-          return result;
-        },
-        transportPersonId,
-        comment,
-      );
-
-    return res.status(200).json({
-      message:
-        'Onsite repair has started.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Start onsite repair error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
 
 
-/**
- * COMPLETE ONSITE REPAIR
- *
- * repair_in_progress
- *          ↓
- * pending_cs_confirmation
- */
-export const completeOnsiteRepair = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const transportPersonId = getUserId(req);
 
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
 
-    const item = await getJobItem(jobItemId);
-
-    if (!item) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
-
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, item.jobId))
-      .limit(1);
-
-    if (!job) {
-      return res.status(404).json({
-        error: 'Parent job not found',
-      });
-    }
-
-    if (
-      !isAuthorizedForJob(
-        job,
-        transportPersonId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error: 'You are not assigned to this job.',
-      });
-    }
-
-    if (item.repairLocation !== 'customer_site') {
-      return res.status(400).json({
-        error:
-          'This item is not an onsite repair item.',
-      });
-    }
-
-    if (
-      item.currentStatus !==
-      'repair_in_progress'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot complete repair from status '${item.currentStatus}'.`,
-      });
-    }
-
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'pending_cs_confirmation',
-        async (tx) => {
-          const [result] = await tx
-            .update(jobItems)
-            .set({
-              currentStatus:
-                'pending_cs_confirmation',
-              updatedAt: new Date(),
-            })
-            .where(eq(jobItems.id, jobItemId))
-            .returning();
-
-          await tx.insert(jobComments).values({
-            jobItemId,
-            userId: transportPersonId,
-            comment,
-          });
-
-          return result;
-        },
-        transportPersonId,
-        comment,
-      );
-
-    return res.status(200).json({
-      message:
-        'Onsite repair completed. CS team has been notified for customer confirmation.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Complete onsite repair error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
 
 
 /**

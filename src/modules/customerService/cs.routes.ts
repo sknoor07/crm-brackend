@@ -12,13 +12,13 @@ import {
 import {
   rejectJobItemByCS,
   generateFinalQuote,
-  getPendingFinalQuotes,
   getJobsWaitingForCSApproval,
   getJobsWaitingToBeClosed,
   closeJobRequest,
   getPendingOnsiteConfirmations,
   confirmOnsiteRepair,
   approveJobByCS,
+  getPendingFinalQuotesOnSite,
 } from './cs.controller.js';
 
 import {
@@ -68,9 +68,9 @@ router.patch(
 );
 
 router.get(
-  '/pending-quotes',
+  '/pending-final-quotes-onsite',
   requireRole(csRoles),
-  getPendingFinalQuotes,
+  getPendingFinalQuotesOnSite,
 );
 
 router.get(

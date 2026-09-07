@@ -69,7 +69,7 @@ export const rejectJobItemSchema = z.object({
     .max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
-export const startOnsiteRepairSchema = z.object({
+export const startAndFinishOnsiteRepairSchema = z.object({
   jobItemId: z.string().uuid('Invalid job item ID format'),
 
   comment: z
@@ -80,7 +80,7 @@ export const startOnsiteRepairSchema = z.object({
 });
 
 export const completeOnsiteRepairSchema = z.object({
-  jobItemId: z.string().uuid('Invalid job item ID format'),
+  jobId: z.string().uuid('Invalid job ID format'),
 
   comment: z
     .string()
@@ -128,8 +128,8 @@ export type RequestFinalQuoteInput =
 export type RejectJobItemInput =
   z.infer<typeof rejectJobItemSchema>;
 
-export type StartOnsiteRepairInput =
-  z.infer<typeof startOnsiteRepairSchema>;
+export type StartAndFinishOnsiteRepairInput =
+  z.infer<typeof startAndFinishOnsiteRepairSchema>;
 
 export type CompleteOnsiteRepairInput =
   z.infer<typeof completeOnsiteRepairSchema>;

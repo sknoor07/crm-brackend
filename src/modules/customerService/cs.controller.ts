@@ -279,14 +279,26 @@ export const generateFinalQuote = async (req: Request<{}, {}, GenerateFinalQuote
  *
  * Both onsite and lab items can require a final quote.
  */
-export const getPendingFinalQuotes = async (req: Request,res: Response,) => {
+export const getPendingFinalQuotesOnSite = async (req: Request,res: Response,) => {
   try {
-    const pendingQuotes = await db.select({job: jobs,jobItem: jobItems,}).from(jobItems)
-      .innerJoin(jobs,eq(jobItems.jobId, jobs.id),)
-      .where(inArray(jobItems.currentStatus,['pending_final_quote','pending_final_quote_onsite',],),)
-      .orderBy(desc(jobItems.updatedAt),);
 
-    return res.status(200).json({count: pendingQuotes.length,jobs: pendingQuotes,});
+    const rawData= await db.select({jobs:jobs, jobItems:jobItems})
+    .from(jobs)
+    .innerJoin(jobItems, eq(jobs.id, jobItems.jobId))
+    .where(eq(jobs.currentStatus, 'pending_final_quote_onsite'));
+
+    const groupedData= new Map<string, {job: typeof jobs.$inferSelect; items: typeof jobItems.$inferSelect[]}>();
+    
+    for (const row of rawData){
+      const jobId= row.jobs.id;
+      if (!groupedData.has(jobId)){
+        groupedData.set(jobId, {job: row.jobs, items: []});
+      }
+      groupedData.get(jobId)?.items.push(row.jobItems);
+    }
+
+
+    return res.status(200).json({count: groupedData.values.length+1, items: Array.from(groupedData.values()),});
   } catch (error) {
     console.error('Fetch pending quotes error:',error,);
 

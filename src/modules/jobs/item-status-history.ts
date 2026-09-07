@@ -25,12 +25,23 @@ export const allowedJobItemTransitions: Record<
 
   approved_for_transport: [
     'transport_inspection',
+    'transport_visit_in_progress',
+  ],
+  transport_visit_in_progress: [
+    'transport_inspection',
+    'repair_in_progress',
+    'repair_rejected',
+    'pending_lab_receipt'  
   ],
 
-  transport_inspection: [
+  repair_in_progress: [
+    'repair_finished',
+  ],
+//
+  repair_finished: [
     'pending_final_quote_onsite',
-    'pending_lab_receipt',
-    'repair_rejected',
+    'pending_repair_manager_inspection',
+    'pending_cs_confirmation'
   ],
 
   pending_final_quote_onsite: [
@@ -72,11 +83,6 @@ export const allowedJobItemTransitions: Record<
 
   repair_authorized: [
     'repair_in_progress',
-  ],
-
-  repair_in_progress: [
-    'pending_repair_manager_inspection',
-    'pending_cs_confirmation',
   ],
 
   pending_repair_manager_inspection: [

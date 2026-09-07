@@ -19,6 +19,8 @@ export type RepairLocation = (typeof repairLocationValues)[number];
 
 export const jobSummaryStatusValues = [
   'in_progress',
+  'going_to_lab',
+  'pending_final_quote_onsite',
   'done',
   'cancelled',
 ] as const;
@@ -40,13 +42,15 @@ export const jobItemStatusValues = [
   'approved_for_transport',
 
   // Transport / customer visit
+  'transport_visit_in_progress',
   'transport_inspection',
   'pending_final_quote_onsite',
   'pending_lab_receipt',
-
+  'repair_finished',
   // Lab handover
   'received_at_lab',
-  'pending_repair_assignment',
+  'pending_repair_assignment'
+  ,
 
   // Repair assignment
   'assigned_to_repair_person',

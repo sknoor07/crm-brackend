@@ -30,7 +30,7 @@ export const jobItems = pgTable('job_items', {id: uuid('id').defaultRandom().pri
      */
     currentStatus: jobItemStatus('current_status').notNull().default('pending_cs_verification'),
 
-    isApprovedByCS:boolean('is_approved_by_cs').notNull().default(true),
+    isApprovedByCS:boolean('is_approved_by_cs').notNull().default(false),
 
     /**
      * Repair Team Manager assigns an individual item
