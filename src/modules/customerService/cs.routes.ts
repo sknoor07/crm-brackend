@@ -19,6 +19,7 @@ import {
   confirmOnsiteRepair,
   approveJobByCS,
   getPendingFinalQuotesOnSite,
+  getCustomerDetails,
 } from './cs.controller.js';
 
 import {
@@ -28,6 +29,7 @@ import {
   closeJobSchema,
   confirmOnsiteRepairSchema,
   csApproveJobAndJobItemSchema,
+  csGetCustomerDetail,
 } from './cs.validation.js';
 
 
@@ -36,7 +38,6 @@ const router = Router();
 router.use(requireAuth);
 
 const csRoles = [
-  'admin',
   'customer_service',
 ];
 
@@ -49,6 +50,12 @@ router.patch(
   approveJobByCS,
 );
 
+router.get(
+  "/getCustomerDetails/:id",
+  requireRole(csRoles),
+  validateRequest(csGetCustomerDetail, "params"),
+  getCustomerDetails
+);
 router.patch(
   '/reject-item',
   requireRole(csRoles),

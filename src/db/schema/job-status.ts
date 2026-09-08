@@ -21,6 +21,8 @@ export const jobSummaryStatusValues = [
   'in_progress',
   'going_to_lab',
   'pending_final_quote_onsite',
+  'delivered',
+  'closed',
   'done',
   'cancelled',
 ] as const;

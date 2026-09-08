@@ -16,11 +16,9 @@ export const jobClosures = pgTable('job_closures', {
 
   closedByUserId: uuid('closed_by_user_id').references(() => users.id).notNull(),
 
-  closureReason: text('closure_reason'),
+  closingRemarks: text('closure_reason'),
 
   customerConfirmed: boolean('customer_confirmed',).default(false),
-
-  paymentConfirmed: boolean('payment_confirmed',).default(false),
 
   notes: text('notes'),
 

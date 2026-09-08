@@ -139,6 +139,7 @@ export const loginUser = async (req: Request<{}, {}, LoginInput>, res: Response)
       .where(eq(userRoles.userId, user.id));
 
     const roleNames = userRoleRows.map((role) => role.roleName);
+    const userProfile= await db.select().from(employeeProfiles).where(eq(employeeProfiles.userId,user.id)).limit(1);
 
     const isPasswordValid = await comparePasswords(
       password,
@@ -184,6 +185,7 @@ export const loginUser = async (req: Request<{}, {}, LoginInput>, res: Response)
         roles: roleNames,
         mustChangePassword: user.mustChangePassword,
       },
+      userProfile,
     });
 
   } catch (error) {
@@ -323,13 +325,9 @@ export const getCurrentUser = async (
         error: "User not found",
       });
     }
+    const userProfile= await db.select().from(employeeProfiles).where(eq(employeeProfiles.userId,user.id)).limit(1);
 
-    return res.status(200).json({
-      user: {
-        ...user,
-        roles: req.user.roles ?? [],
-      },
-    });
+    return res.status(200).json({user: {...user,roles: req.user.roles ?? [],},userProfile,});
   } catch (error) {
     console.error("Get current user error:", error);
 

@@ -10,15 +10,17 @@ import { users } from './users.js';
 import { jobSummaryStatus } from './job-status.js';
 ;
 
-export const jobs = pgTable('jobs', {id: uuid('id').defaultRandom().primaryKey(),
+export const jobs = pgTable('jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
 
-  jobNumber: varchar('job_number', {length: 36,}).notNull().unique(),
+  jobNumber: varchar('job_number', { length: 36, }).notNull().unique(),
 
   customerId: uuid('customer_id').references(() => users.id).notNull(),
 
   currentStatus: jobSummaryStatus('current_status',).notNull().default('in_progress'),
+  paymentConfirmed: boolean('payment_confirmed',).default(false),
 
-  isApprovedByCS:boolean('is_approved_by_cs'),
+  isApprovedByCS: boolean('is_approved_by_cs'),
 
   transportManagerId: uuid('transport_manager_id',).references(() => users.id),
 

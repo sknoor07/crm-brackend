@@ -94,3 +94,10 @@ export const confirmOnsiteRepairSchema = z.object({
 });
 export type ConfirmOnsiteRepairInput =
   z.infer<typeof confirmOnsiteRepairSchema>;
+
+export const csGetCustomerDetail = z.object({
+  id: z.string().uuid(),
+});
+
+export type CsGetCusotmerDeatil =
+  z.infer<typeof csGetCustomerDetail>;

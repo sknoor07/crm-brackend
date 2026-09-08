@@ -1,37 +1,38 @@
 import { Request, Response } from 'express';
 
-import {asc,desc,eq,inArray} from 'drizzle-orm';
+import { and, asc, desc, eq, exists, inArray, notExists, sql } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import {jobs,jobItems,jobComments,jobStatusHistory,jobClosures,jobItemQuotes,deviceServiceCharges, jobItemQuoteLines, JobItemStatus, jobItemStatusHistory, JobSummaryStatus,} from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, jobStatusHistory, jobClosures, jobItemQuotes, deviceServiceCharges, jobItemQuoteLines, JobItemStatus, jobItemStatusHistory, JobSummaryStatus, users, customerProfiles, } from '../../db/schema/index.js';
 
-import {CSRejectJobItemInput,GenerateFinalQuoteInput,CloseJobInput,ConfirmOnsiteRepairInput, CSApproveJobAndJobItemInput, 
+import {
+  CSRejectJobItemInput, GenerateFinalQuoteInput, CloseJobInput, ConfirmOnsiteRepairInput, CSApproveJobAndJobItemInput,
 } from './cs.validation.js';
 
-import {updateJobItemWithStatusTransition} from '../jobs/item-status-history.js';
-import {buildQuoteLineValues, insertJobItemQuoteWithLines, moneyString, resolveQuoteComponents} from '../jobs/quote-components.js';
+import { updateJobItemWithStatusTransition } from '../jobs/item-status-history.js';
+import { buildQuoteLineValues, insertJobItemQuoteWithLines, moneyString, resolveQuoteComponents } from '../jobs/quote-components.js';
 import { processCSJobApproval } from './service/approveJobsByCS.js';
 
 
 // Get All Jobs which are applied by customer and pending for approval at cs
-export const getJobsWaitingForCSApproval = async (req: Request,res: Response,) => {
+export const getJobsWaitingForCSApproval = async (req: Request, res: Response,) => {
   try {
     const data = await db
-      .select({job: jobs,jobItem: jobItems,})
+      .select({ job: jobs, jobItem: jobItems, })
       .from(jobItems)
-      .innerJoin(jobs,eq(jobItems.jobId, jobs.id),)
-      .where(eq(jobItems.currentStatus,'pending_cs_verification',),)
+      .innerJoin(jobs, eq(jobItems.jobId, jobs.id),)
+      .where(eq(jobItems.currentStatus, 'pending_cs_verification',),)
       .orderBy(desc(jobItems.updatedAt),);
 
     // Group job items by job ID
-    const groupedJobs = new Map<string,{job: typeof jobs.$inferSelect;jobItems: typeof jobItems.$inferSelect[];}>();
+    const groupedJobs = new Map<string, { job: typeof jobs.$inferSelect; jobItems: typeof jobItems.$inferSelect[]; }>();
 
     for (const row of data) {
       const jobId = row.job.id;
 
       if (!groupedJobs.has(jobId)) {
-        groupedJobs.set(jobId, {job: row.job,jobItems: [],});
+        groupedJobs.set(jobId, { job: row.job, jobItems: [], });
       }
 
       groupedJobs.get(jobId)!.jobItems.push(row.jobItem);
@@ -39,44 +40,76 @@ export const getJobsWaitingForCSApproval = async (req: Request,res: Response,) =
 
     const result = Array.from(groupedJobs.values(),);
 
-    return res.status(200).json({count: result.length,jobs: result,});
+    return res.status(200).json({ count: result.length, jobs: result, });
   } catch (error) {
-    console.error('Error fetching jobs waiting for CS approval:',error,);
-    return res.status(500).json({error:'Internal server error while fetching jobs',});
+    console.error('Error fetching jobs waiting for CS approval:', error,);
+    return res.status(500).json({ error: 'Internal server error while fetching jobs', });
   }
 };
 
+interface CustomerParams {
+  id: string;
+}
 
+export const getCustomerDetails = async (
+  req: Request<CustomerParams>,
+  res: Response
+) => {
+  try {
+    const customerId = req.params.id;
+
+    if (!customerId) {
+      return res.status(400).json({
+        message: "Invalid customer ID",
+      });
+    }
+
+    const customerDetails = await db
+      .select()
+      .from(customerProfiles)
+      .where(eq(customerProfiles.userId, customerId)).limit(1);
+
+    return res.status(200).json(customerDetails);
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      message: "Failed to get customer details",
+    });
+  }
+};
 
 /**
  Job Item Approve for Transport team Manager so he can arrange for Pickup only by Transport Team Members
- */ 
- export const approveJobByCS = async (req: Request<{},{},CSApproveJobAndJobItemInput>,res: Response,) => {
-   try {
-     const csUserId = req.user?.userId;
- 
-     if (!csUserId) {
-       return res.status(401).json({error: 'Authenticated CS user is required',});
-     }
- 
-     const result = await processCSJobApproval(req.body,csUserId);
- 
-     return res.status(200).json({message:'CS job verification processed successfully.',
-       job: result.job,
-       jobItems: result.jobItems,
-     });
-   } catch (error) {console.error('CS job approval error:',error,);
- 
-     return res.status(400).json({error: error instanceof Error? error.message: 'Failed to process CS job verification',});
-   }
- };
+ */
+export const approveJobByCS = async (req: Request<{}, {}, CSApproveJobAndJobItemInput>, res: Response,) => {
+  try {
+    const csUserId = req.user?.userId;
+
+    if (!csUserId) {
+      return res.status(401).json({ error: 'Authenticated CS user is required', });
+    }
+
+    const result = await processCSJobApproval(req.body, csUserId);
+
+    return res.status(200).json({
+      message: 'CS job verification processed successfully.',
+      job: result.job,
+      jobItems: result.jobItems,
+    });
+  } catch (error) {
+    console.error('CS job approval error:', error,);
+
+    return res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to process CS job verification', });
+  }
+};
 
 /**
 customer  rejects a repair for a item
  */
 export const rejectJobItemByCS = async (req: Request<{}, {}, CSRejectJobItemInput>, res: Response) => {
   try {
-    const {jobItemId, comment} = req.body;
+    const { jobItemId, comment } = req.body;
 
     const csUserId = req.user?.userId;
 
@@ -101,8 +134,8 @@ export const rejectJobItemByCS = async (req: Request<{}, {}, CSRejectJobItemInpu
       });
     }
 
-    const updatedJobItem = await updateJobItemWithStatusTransition(jobItem.id,jobItem.currentStatus,'repair_rejected', 
-      async (tx) => {const [updated] = await tx.update(jobItems).set({ currentStatus: 'repair_rejected', updatedAt: new Date() }).where(eq(jobItems.id, jobItem.id)).returning(); return updated; },csUserId,comment.trim());
+    const updatedJobItem = await updateJobItemWithStatusTransition(jobItem.id, jobItem.currentStatus, 'repair_rejected',
+      async (tx) => { const [updated] = await tx.update(jobItems).set({ currentStatus: 'repair_rejected', updatedAt: new Date() }).where(eq(jobItems.id, jobItem.id)).returning(); return updated; }, csUserId, comment.trim());
 
     return res.status(200).json({ message: 'Job item rejected successfully.', jobItem: updatedJobItem });
   } catch (error) {
@@ -144,7 +177,7 @@ export const rejectJobItemByCS = async (req: Request<{}, {}, CSRejectJobItemInpu
  */
 export const generateFinalQuote = async (req: Request<{}, {}, GenerateFinalQuoteInput>, res: Response) => {
   try {
-    const {jobItemId, components, comment} = req.body;
+    const { jobItemId, components, comment } = req.body;
 
     const csUserId = req.user?.userId;
 
@@ -191,7 +224,7 @@ export const generateFinalQuote = async (req: Request<{}, {}, GenerateFinalQuote
     const nextVersion =
       (latestQuote?.version ?? 0) + 1;
 
-    let persistedQuote: {quoteId: string;lineCount: number;componentsCost: number;totalAmount: number} | null = null;
+    let persistedQuote: { quoteId: string; lineCount: number; componentsCost: number; totalAmount: number } | null = null;
 
     const updatedJobItem =
       await updateJobItemWithStatusTransition(
@@ -279,30 +312,30 @@ export const generateFinalQuote = async (req: Request<{}, {}, GenerateFinalQuote
  *
  * Both onsite and lab items can require a final quote.
  */
-export const getPendingFinalQuotesOnSite = async (req: Request,res: Response,) => {
+export const getPendingFinalQuotesOnSite = async (req: Request, res: Response,) => {
   try {
 
-    const rawData= await db.select({jobs:jobs, jobItems:jobItems})
-    .from(jobs)
-    .innerJoin(jobItems, eq(jobs.id, jobItems.jobId))
-    .where(eq(jobs.currentStatus, 'pending_final_quote_onsite'));
+    const rawData = await db.select({ jobs: jobs, jobItems: jobItems })
+      .from(jobs)
+      .innerJoin(jobItems, eq(jobs.id, jobItems.jobId))
+      .where(eq(jobs.currentStatus, 'pending_final_quote_onsite'));
 
-    const groupedData= new Map<string, {job: typeof jobs.$inferSelect; items: typeof jobItems.$inferSelect[]}>();
-    
-    for (const row of rawData){
-      const jobId= row.jobs.id;
-      if (!groupedData.has(jobId)){
-        groupedData.set(jobId, {job: row.jobs, items: []});
+    const groupedData = new Map<string, { job: typeof jobs.$inferSelect; items: typeof jobItems.$inferSelect[] }>();
+
+    for (const row of rawData) {
+      const jobId = row.jobs.id;
+      if (!groupedData.has(jobId)) {
+        groupedData.set(jobId, { job: row.jobs, items: [] });
       }
       groupedData.get(jobId)?.items.push(row.jobItems);
     }
 
 
-    return res.status(200).json({count: groupedData.values.length+1, items: Array.from(groupedData.values()),});
+    return res.status(200).json({ count: groupedData.values.length + 1, items: Array.from(groupedData.values()), });
   } catch (error) {
-    console.error('Fetch pending quotes error:',error,);
+    console.error('Fetch pending quotes error:', error,);
 
-    return res.status(500).json({error:'Internal server error while fetching pending quotes',});
+    return res.status(500).json({ error: 'Internal server error while fetching pending quotes', });
   }
 };
 
@@ -516,103 +549,169 @@ export const getJobsWaitingToBeClosed = async (
   res: Response,
 ) => {
   try {
-    const data = await db
+    /**
+     * 1. At least one item must exist for the job.
+     */
+    const hasItems = db
       .select({
-        job: jobs,
-        jobItem: jobItems,
+        id: jobItems.id,
       })
       .from(jobItems)
-      .innerJoin(
-        jobs,
-        eq(jobItems.jobId, jobs.id),
-      )
       .where(
-        inArray(
-          jobItems.currentStatus,
-          [
-            'delivered',
-            'repair_rejected',
-          ],
+        eq(
+          jobItems.jobId,
+          jobs.id,
         ),
-      )
-      .orderBy(
-        desc(jobItems.updatedAt),
       );
 
     /**
-     * Group items by job.
+     * 2. There must NOT be an item whose
+     *    status is something other than:
      *
-     * We cannot simply return every job having one
-     * delivered item because a job may contain multiple
-     * items and some of them may still be in progress.
+     *    delivered
+     *    repair_rejected
      */
-    const groupedJobs = new Map<
+    const hasNonFinalItems = db
+      .select({
+        id: jobItems.id,
+      })
+      .from(jobItems)
+      .where(
+        and(
+          eq(
+            jobItems.jobId,
+            jobs.id,
+          ),
+
+          sql`${jobItems.currentStatus} NOT IN ('delivered', 'repair_rejected')`,
+        ),
+      );
+
+    /**
+     * Get all jobs that are ready to be closed.
+     */
+    const rows = await db
+      .select({
+        job: jobs,
+
+        customerUser: {
+          id: users.id,
+          email: users.email,
+          userType: users.userType,
+          phone: users.phone,
+          isActive: users.isActive,
+          mustChangePassword:
+            users.mustChangePassword,
+          createdAt: users.createdAt,
+          updatedAt: users.updatedAt,
+        },
+
+        customerProfile:
+          customerProfiles,
+
+        item: jobItems,
+      })
+      .from(jobs)
+
+      .innerJoin(
+        users,
+        eq(
+          jobs.customerId,
+          users.id,
+        ),
+      )
+
+      .leftJoin(
+        customerProfiles,
+        eq(
+          customerProfiles.userId,
+          users.id,
+        ),
+      )
+
+      .leftJoin(
+        jobItems,
+        eq(
+          jobItems.jobId,
+          jobs.id,
+        ),
+      )
+
+      .where(
+        and(
+          /**
+           * Job must still be in progress.
+           */
+          eq(
+            jobs.currentStatus,
+            'in_progress',
+          ),
+
+          /**
+           * Job must have at least one item.
+           */
+          exists(hasItems),
+
+          /**
+           * No non-final items are allowed.
+           */
+          notExists(hasNonFinalItems),
+        ),
+      );
+
+    /**
+     * Group the JOIN result.
+     *
+     * Because one job can have multiple items,
+     * the SQL query returns one row per item.
+     *
+     * We convert that into:
+     *
+     * job
+     * customer
+     * items[]
+     */
+    const jobsMap = new Map<
       string,
       {
-        job: typeof data[number]['job'];
-        items: typeof data[number]['jobItem'][];
+        job: typeof rows[number]['job'];
+        customer: {
+          user: typeof rows[number]['customerUser'];
+          profile: typeof rows[number]['customerProfile'];
+        };
+        items: NonNullable<
+          typeof rows[number]['item']
+        >[];
       }
     >();
 
-    for (const row of data) {
+    for (const row of rows) {
       const jobId = row.job.id;
 
-      const existing =
-        groupedJobs.get(jobId);
-
-      if (existing) {
-        existing.items.push(
-          row.jobItem,
-        );
-      } else {
-        groupedJobs.set(jobId, {
+      if (!jobsMap.has(jobId)) {
+        jobsMap.set(jobId, {
           job: row.job,
-          items: [row.jobItem],
+
+          customer: {
+            user: row.customerUser,
+            profile:
+              row.customerProfile,
+          },
+
+          items: [],
         });
+      }
+
+      if (row.item) {
+        jobsMap
+          .get(jobId)!
+          .items.push(row.item);
       }
     }
 
-    /**
-     * We need to make sure EVERY item belonging to the
-     * job is final, not only the items returned above.
-     */
-    const result = [];
-
-    for (const [jobId, group] of groupedJobs) {
-      const allItems = await db
-        .select({
-          id: jobItems.id,
-          currentStatus:
-            jobItems.currentStatus,
-        })
-        .from(jobItems)
-        .where(
-          eq(
-            jobItems.jobId,
-            jobId,
-          ),
-        );
-
-      if (allItems.length === 0) {
-        continue;
-      }
-
-      const allItemsFinal =
-        allItems.every(
-          (item) =>
-            item.currentStatus ===
-              'delivered' ||
-            item.currentStatus ===
-              'repair_rejected',
-        );
-
-      if (allItemsFinal) {
-        result.push({
-          job: group.job,
-          items: allItems,
-        });
-      }
-    }
+    const result = Array.from(
+      jobsMap.values(),
+    );
 
     return res.status(200).json({
       count: result.length,
@@ -620,13 +719,13 @@ export const getJobsWaitingToBeClosed = async (
     });
   } catch (error) {
     console.error(
-      'Job Fetch error:',
+      'Get jobs waiting to be closed error:',
       error,
     );
 
     return res.status(500).json({
       error:
-        'Cannot fetch jobs ready for closure',
+        'Internal server error',
     });
   }
 };
@@ -649,237 +748,318 @@ export const getJobsWaitingToBeClosed = async (
  * All detailed workflow information lives on job_items.
  */
 export const closeJobRequest = async (
-  req: Request<{}, {}, CloseJobInput>,
+  req: Request<
+    {},
+    {},
+    {
+      jobId: string;
+      closureReason?: string;
+      customerConfirmed?: boolean;
+      paymentConfirmed?: boolean;
+    }
+  >,
   res: Response,
 ) => {
   try {
-    const {
-      jobId,
-      customerConfirmed,
-      paymentConfirmed,
-      closingRemarks,
-    } = req.body;
-
-    const csUserId = req.user?.userId;
-
-    if (!csUserId) {
+    if (!req.user?.userId) {
       return res.status(401).json({
-        error: 'Authenticated CS user is required',
+        status: 'error',
+        message: 'Unauthorized',
       });
     }
 
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, jobId))
-      .limit(1);
+    const userId = req.user.userId;
 
-    if (!job) {
+    const {
+        jobId,
+      customerConfirmed = false,
+      paymentConfirmed = false,
+      closureReason,
+    } = req.body;
+
+
+
+    if (!paymentConfirmed) {
+      return res.status(400).json({
+        error: 'Payment confirmation is required to close the job.',
+      });
+    }
+
+    /**
+     * First fetch the job and its items.
+     */
+    const rows = await db
+      .select({
+        job: jobs,
+        customerUser: users,
+        customerProfile: customerProfiles,
+        item: jobItems,
+      })
+      .from(jobs)
+      .innerJoin(
+        users,
+        eq(jobs.customerId, users.id),
+      )
+      .leftJoin(
+        customerProfiles,
+        eq(customerProfiles.userId, users.id),
+      )
+      .leftJoin(
+        jobItems,
+        eq(jobItems.jobId, jobs.id),
+      )
+      .where(eq(jobs.id, jobId));
+
+    /**
+     * Job doesn't exist.
+     */
+    if (rows.length === 0) {
       return res.status(404).json({
         error: 'Job not found',
       });
     }
 
+    const firstRow = rows[0];
+
+    const job = firstRow.job;
+
     /**
-     * Job-level status should only be changed from
-     * in_progress to done.
+     * Get all items belonging to the job.
      */
-    if (
-      job.currentStatus !==
-      'in_progress'
-    ) {
+    const items = rows
+      .map((row) => row.item)
+      .filter(
+        (item): item is NonNullable<typeof item> =>
+          item !== null,
+      );
+
+    /**
+     * --------------------------------------------------
+     * VALIDATION 1
+     * Job must be delivered before it can be closed.
+     * --------------------------------------------------
+     */
+    if (job.currentStatus !== 'delivered') {
       return res.status(400).json({
-        error:
-          `Job cannot be closed because its current status is '${job.currentStatus}'.`,
+        error: 'Job cannot be closed',
+        message:
+          `Job must be in delivered status before closing. ` +
+          `Current status: ${job.currentStatus}`,
       });
     }
 
-    const items = await db
-      .select({
-        id: jobItems.id,
-        currentStatus:
-          jobItems.currentStatus,
-      })
-      .from(jobItems)
-      .where(
-        eq(
-          jobItems.jobId,
-          jobId,
-        ),
-      );
-
+    /**
+     * --------------------------------------------------
+     * VALIDATION 2
+     * Job must have at least one item.
+     * --------------------------------------------------
+     */
     if (items.length === 0) {
       return res.status(400).json({
-        error:
-          'Cannot close a job that has no items',
+        error: 'Job cannot be closed',
+        message: 'Job must contain at least one item.',
       });
     }
 
     /**
-     * Every item must reach a terminal business outcome.
+     * --------------------------------------------------
+     * VALIDATION 3
+     *
+     * Every item must be:
+     *
+     * delivered
+     * OR
+     * repair_rejected
+     * --------------------------------------------------
      */
-    const allItemsFinal =
-      items.every(
-        (item) =>
-          item.currentStatus ===
-            'delivered' ||
-          item.currentStatus ===
-            'repair_rejected',
-      );
+    const nonFinalItems = items.filter(
+      (item) =>
+        item.currentStatus !== 'delivered' &&
+        item.currentStatus !== 'repair_rejected',
+    );
 
-    if (!allItemsFinal) {
+    if (nonFinalItems.length > 0) {
       return res.status(400).json({
-        error:
-          'Cannot close job. All job items must be delivered or repair rejected.',
+        error: 'Job cannot be closed',
+        message:
+          'All job items must be either delivered or repair_rejected.',
+        nonFinalItems: nonFinalItems.map((item) => ({
+          id: item.id,
+          deviceCategory: item.deviceCategory,
+          currentStatus: item.currentStatus,
+        })),
       });
     }
 
+    /**
+     * --------------------------------------------------
+     * VALIDATION 4
+     * Customer confirmation.
+     * --------------------------------------------------
+     */
     if (!customerConfirmed) {
       return res.status(400).json({
-        error:
-          'Customer confirmation is required before closing the job.',
+        error: 'Customer confirmation is required.',
       });
     }
 
-    if (!paymentConfirmed) {
-      return res.status(400).json({
-        error:
-          'Payment confirmation is required before closing the job.',
-      });
-    }
+    /**
+     * --------------------------------------------------
+     * VALIDATION 5
+     * Payment confirmation.
+     * --------------------------------------------------
+     */
 
-    const updatedJob =
-      await db.transaction(
-        async (tx) => {
-          /**
-           * Re-check the status inside the transaction
-           * before performing the final update.
-           */
-          const [currentJob] =
-            await tx
-              .select()
-              .from(jobs)
-              .where(
-                eq(
-                  jobs.id,
-                  jobId,
-                ),
-              )
-              .limit(1);
+    /**
+     * --------------------------------------------------
+     * TRANSACTION
+     * --------------------------------------------------
+     */
+    const result = await db.transaction(async (tx) => {
+      /**
+       * Re-check the job status inside the transaction.
+       *
+       * This prevents two requests from closing the same job
+       * at the same time.
+       */
+      const currentJob = await tx
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.id, jobId),
+            eq(jobs.currentStatus, 'delivered'),
+          ),
+        )
+        .limit(1);
 
-          if (!currentJob) {
-            throw new Error(
-              'Job not found during closure transaction',
-            );
-          }
+      if (currentJob.length === 0) {
+        throw new Error(
+          'Job is no longer in delivered status.',
+        );
+      }
 
-          if (
-            currentJob.currentStatus !==
-            'in_progress'
-          ) {
-            throw new Error(
-              `Job cannot be closed from status '${currentJob.currentStatus}'`,
-            );
-          }
+      /**
+       * Make sure a closure does not already exist.
+       */
+      const existingClosure = await tx
+        .select({
+          id: jobClosures.id,
+        })
+        .from(jobClosures)
+        .where(eq(jobClosures.jobId, jobId))
+        .limit(1);
 
-          /**
-           * Validate the configured job-level
-           * transition.
-           */
+      if (existingClosure.length > 0) {
+        throw new Error(
+          'Job has already been closed.',
+        );
+      }
 
-          const [closedJob] =
-            await tx
-              .update(jobs)
-              .set({
-                currentStatus: 'done',
-                updatedAt:
-                  new Date(),
-              })
-              .where(
-                eq(
-                  jobs.id,
-                  jobId,
-                ),
-              )
-              .returning();
+      /**
+       * Update job status:
+       *
+       * delivered → closed
+       */
+      const [updatedJob] = await tx
+        .update(jobs)
+        .set({
+          currentStatus: 'closed',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(jobs.id, jobId),
+            eq(jobs.currentStatus, 'delivered'),
+          ),
+        )
+        .returning();
 
-          /**
-           * Record the actual job-level status change.
-           */
-          await tx
-            .insert(jobStatusHistory)
-            .values({
-              jobId,
+      /**
+       * Record job status history.
+       */
+      await tx
+        .insert(jobStatusHistory)
+        .values({
+          jobId,
+          previousStatus: 'delivered',
+          newStatus: 'closed',
+          changedBy: req.user?.userId,
+          note: closureReason ?? 'Job closed',
+        });
 
-              previousStatus:
-                'in_progress',
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          error: 'Unauthorized',
+        });
+      }
 
-              newStatus:
-                'done',
 
-              changedBy:
-                csUserId,
+      const userId = req.user.userId;
 
-              note:
-                closingRemarks.trim(),
-            });
+      /**
+       * Create closure record.
+       */
+      const [closure] = await tx
+        .insert(jobClosures)
+        .values({
+          jobId,
+          closedByUserId: userId,
+          closingRemarks: closureReason ?? null,
+          customerConfirmed,
+        })
+        .returning();
 
-          /**
-           * Store the closure record.
-           */
-          await tx
-            .insert(jobClosures)
-            .values({
-              jobId,
+      /**
+       * Create job-level comment.
+       *
+       * jobId is set.
+       * jobItemId remains NULL.
+       */
+      const [comment] = await tx
+        .insert(jobComments)
+        .values({
+          jobId,
+          jobItemId: null,
+          userId,
+          comment: closureReason?? 'Job closed successfully.',
+        })
+        .returning();
 
-              closedByUserId:
-                csUserId,
-
-              closureReason:
-                'All job items reached final status.',
-
-              customerConfirmed: true,
-
-              paymentConfirmed: true,
-
-              notes:
-                closingRemarks.trim(),
-            });
-
-          /**
-           * Closure comment belongs to the JOB,
-           * not to every item.
-           */
-          await tx
-            .insert(jobComments)
-            .values({
-              jobId,
-
-              userId:
-                csUserId,
-
-              comment:
-                closingRemarks.trim(),
-            });
-
-          return closedJob;
-        },
-      );
+      return {
+        job: updatedJob,
+        closure,
+        comment,
+      };
+    });
 
     return res.status(200).json({
-      message:
-        'Job successfully closed.',
-      job: updatedJob,
+      message: 'Job closed successfully.',
+      ...result,
     });
+
   } catch (error) {
     console.error(
-      'Job closure error:',
+      'Close job error:',
       error,
     );
 
+    if (
+      error instanceof Error &&
+      (
+        error.message ===
+        'Job is no longer in delivered status.' ||
+        error.message ===
+        'Job has already been closed.'
+      )
+    ) {
+      return res.status(409).json({
+        error: error.message,
+      });
+    }
+
     return res.status(500).json({
-      error:
-        'Internal server error while closing job',
+      error: 'Internal server error',
     });
   }
 };

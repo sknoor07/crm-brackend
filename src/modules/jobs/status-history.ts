@@ -12,8 +12,18 @@ export const allowedJobTransitions: Record<
     'cancelled',
   ],
 
-  going_to_lab:[],
-  done: [],
-  pending_final_quote_onsite: ['done'],
+  going_to_lab: [],
+
+  pending_final_quote_onsite: [
+    'delivered',
+    'cancelled',
+  ],
+
+  delivered: [
+    'closed',
+  ],
+
+  closed: [],
+
   cancelled: [],
 };
