@@ -10,26 +10,30 @@ import {
 } from '../../shared/middleware/validateRequest.js';
 
 import {
-  rejectJobItemByCS,
+
   generateFinalQuote,
   getJobsWaitingForCSApproval,
   getJobsWaitingToBeClosed,
   closeJobRequest,
   getPendingOnsiteConfirmations,
-  confirmOnsiteRepair,
+
   approveJobByCS,
   getPendingFinalQuotesOnSite,
-  getCustomerDetails,
+  searchCustomers,
+  seacrhCustomerDetailswithJob,
+  getjobDetails,
 } from './cs.controller.js';
 
 import {
   csApproveJobItemSchema,
-  csRejectJobItemSchema,
+
   generateFinalQuoteSchema,
-  closeJobSchema,
-  confirmOnsiteRepairSchema,
+
   csApproveJobAndJobItemSchema,
   csGetCustomerDetail,
+  searchCustomerSchema,
+  closeJobSchema,
+
 } from './cs.validation.js';
 
 
@@ -41,8 +45,43 @@ const csRoles = [
   'customer_service',
 ];
 
+
+router.get(
+  '/pending-approval',
+  requireRole(csRoles),
+  getJobsWaitingForCSApproval,
+);
+
+router.get(
+  "/getCustomerDetails/:id",
+  requireRole(csRoles),
+  validateRequest(csGetCustomerDetail, "params"),
+  seacrhCustomerDetailswithJob,
+);
+
+router.get(
+  '/search',
+  requireRole(csRoles),
+  validateRequest(searchCustomerSchema, 'query'),
+  searchCustomers,
+);
+
+router.get(
+  '/ready-for-closure',
+  requireRole(csRoles),
+  getJobsWaitingToBeClosed,
+);
+
 router.patch(
-  '/approve-item',
+  '/close',
+  requireRole(csRoles),
+  validateRequest(closeJobSchema),
+  closeJobRequest,
+);
+
+
+router.patch(
+  '/submit-job',
   requireRole(csRoles),
   validateRequest(
     csApproveJobAndJobItemSchema,
@@ -51,19 +90,27 @@ router.patch(
 );
 
 router.get(
-  "/getCustomerDetails/:id",
+  '/getjobdetails/:id',
   requireRole(csRoles),
-  validateRequest(csGetCustomerDetail, "params"),
-  getCustomerDetails
-);
-router.patch(
-  '/reject-item',
-  requireRole(csRoles),
-  validateRequest(
-    csRejectJobItemSchema,
-  ),
-  rejectJobItemByCS,
-);
+  getjobDetails,
+)
+
+
+
+
+
+
+
+
+
+///done till here
+
+
+
+
+
+
+
 
 router.patch(
   '/final-quote',
@@ -80,11 +127,7 @@ router.get(
   getPendingFinalQuotesOnSite,
 );
 
-router.get(
-  '/pending-approval',
-  requireRole(csRoles),
-  getJobsWaitingForCSApproval,
-);
+
 
 router.get(
   '/pending-onsite-confirmation',
@@ -92,26 +135,14 @@ router.get(
   getPendingOnsiteConfirmations,
 );
 
-router.patch(
-  '/confirm-onsite-repair',
-  requireRole(csRoles),
-  validateRequest(
-    confirmOnsiteRepairSchema,
-  ),
-  confirmOnsiteRepair,
-);
+// router.patch(
+//   '/confirm-onsite-repair',
+//   requireRole(csRoles),
+//   validateRequest(
+//     confirmOnsiteRepairSchema,
+//   ),
+//   confirmOnsiteRepair,
+// );
 
-router.get(
-  '/ready-for-closure',
-  requireRole(csRoles),
-  getJobsWaitingToBeClosed,
-);
-
-router.patch(
-  '/close',
-  requireRole(csRoles),
-  validateRequest(closeJobSchema),
-  closeJobRequest,
-);
 
 export default router;

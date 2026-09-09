@@ -26,7 +26,7 @@ import {
   ApproveRepairInput,
   RejectRepairInspectionInput,
 } from './repair.validation.js';
-import { updateJobItemWithStatusTransition } from '../jobs/item-status-history.js';
+import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
 
 
 /*

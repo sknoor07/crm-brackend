@@ -32,7 +32,7 @@ import type {
   JobItemStatus,
 } from '../../db/schema/job-status.js';
 import { error } from 'node:console';
-import { updateJobItemWithStatusTransition } from '../jobs/item-status-history.js';
+import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
 
 
 /* =========================================================

@@ -18,14 +18,14 @@ import {
 
 import {
   updateJobItemWithStatusTransition,
-} from '../jobs/item-status-history.js';
+} from '../jobstatusandtransitions/item-status-history.js';
 
 import type {
   JobItemStatus,
   JobSummaryStatus,
 } from '../../db/schema/job-status.js';
 import { DeliverItemInput, StartDeliveryInput } from './transportPerson.validation.js';
-import { allowedJobTransitions } from '../jobs/status-history.js';
+import { allowedJobTransitions } from '../jobstatusandtransitions/status-history.js';
 import { date } from 'zod';
 
 

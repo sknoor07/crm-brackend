@@ -20,7 +20,7 @@ export const jobs = pgTable('jobs', {
   currentStatus: jobSummaryStatus('current_status',).notNull().default('in_progress'),
   paymentConfirmed: boolean('payment_confirmed',).default(false),
 
-  isApprovedByCS: boolean('is_approved_by_cs'),
+  isApprovedByCS: boolean('is_approved_by_cs').default(false),
 
   transportManagerId: uuid('transport_manager_id',).references(() => users.id),
 

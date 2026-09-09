@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { quoteComponentSchema } from '../customerService/cs.validation.js';
+import { estimatedComponentSchema } from '../customerService/cs.validation.js';
 
 
 
@@ -53,7 +53,7 @@ export const createJobSchema = z.object({
     .optional(),
 
   estimatedComponents: z
-    .array(quoteComponentSchema)
+    .array(estimatedComponentSchema)
     .min(1, 'Provide at least one estimated component')
     .optional(),
 
