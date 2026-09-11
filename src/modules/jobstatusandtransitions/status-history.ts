@@ -21,6 +21,7 @@ export const allowedJobTransitions: Record<
 
   pending_visit: [
     'repair_started',
+    'going_to_lab',
   ],
 
   repair_started: [

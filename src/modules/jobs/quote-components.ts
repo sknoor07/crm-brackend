@@ -13,13 +13,12 @@ export const roundMoney = (value: number) =>
   Math.round(value * 100) / 100;
 
 export const moneyString = (value: number) => roundMoney(value).toFixed(2);
-
 export const buildQuoteLineValues = (
-  quoteId: string ,
+  quoteId: string,
   components: QuoteComponentInput[],
 ) => {
   const lines = components.map((component, index) => {
-    const quantity = component.quantity ?? 1;
+    const quantity = component.quantity;
     const unitPrice = roundMoney(component.unitPrice);
     const lineTotal = roundMoney(quantity * unitPrice);
 
@@ -75,36 +74,52 @@ export const resolveQuoteComponents = (components?: QuoteComponentInput[],fallba
 export const insertJobItemQuoteWithLines = async (
   tx: DbTransaction,
   input: {
+    jobQuoteId: string;
     jobItemId: string;
-    version: number;
     components: QuoteComponentInput[];
     serviceCharge: string | number;
     createdByUserId: string;
-    status: string;
   },
 ) => {
-  const preview = buildQuoteLineValues('preview', input.components);
-  const serviceChargeAmount = Number(input.serviceCharge);
-  const totalAmount = roundMoney(preview.componentsCost + serviceChargeAmount);
+  const preview = buildQuoteLineValues(
+    'preview',
+    input.components,
+  );
+
+  const serviceChargeAmount = Number(
+    input.serviceCharge,
+  );
+
+  const totalAmount = roundMoney(
+    preview.componentsCost + serviceChargeAmount,
+  );
 
   const [quote] = await tx
     .insert(jobItemQuotes)
     .values({
+      jobQuoteId: input.jobQuoteId,
       jobItemId: input.jobItemId,
-      version: input.version,
-      componentsCost: moneyString(preview.componentsCost),
+
+      componentsCost: moneyString(
+        preview.componentsCost,
+      ),
+
       serviceCharge:
         typeof input.serviceCharge === 'string'
           ? input.serviceCharge
           : moneyString(serviceChargeAmount),
+
       totalAmount: moneyString(totalAmount),
+
       createdByUserId: input.createdByUserId,
-      customerApproved: null,
-      status: input.status,
     })
     .returning();
 
-  const { lines } = await insertQuoteLines(tx, quote.id, input.components);
+  const { lines } = await insertQuoteLines(
+    tx,
+    quote.id,
+    input.components,
+  );
 
   return {
     quote,

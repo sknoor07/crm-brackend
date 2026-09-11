@@ -15,19 +15,19 @@ import {
   finishOnsiteRepair,
   sendJobforInspectionAtLab,
   getjobdetailswithestimatedquote,
+  completeTransportInspection,
 } from './transportPerson.controller.js';
 
 import {
   jobIdParamsSchema,
   startTransportJobSchema,
-  inspectJobItemSchema,
-  sendItemToLabSchema,
   requestFinalQuoteSchema,
   rejectJobItemSchema,
   completeOnsiteRepairSchema,
   startDeliverySchema,
   deliverItemSchema,
   startAndFinishOnsiteRepairSchema,
+  completeTransportInspectionSchema,
 } from './transportPerson.validation.js';
 
 import {
@@ -45,7 +45,6 @@ const router = Router();
 router.use(requireAuth);
 
 const transportRoles = [
-  'admin',
   'transport_team_person',
 ];
 
@@ -72,16 +71,20 @@ router.get(
 router.get(
   '/getjobdetailswithestimated-quote/:id',
   requireRole(transportRoles,),
+  validateRequest(jobIdParamsSchema, "params"),
   getjobdetailswithestimatedquote,
 )
 
 
-router.patch(
-  '/start',
-  requireRole(transportRoles),
-  validateRequest(startTransportJobSchema),
-  startTransportJobVisit,
-);
+// router.patch(
+//   '/start',
+//   requireRole(transportRoles),
+//   validateRequest(startTransportJobSchema),
+//   startTransportJobVisit,
+// );
+
+
+router.post('/complete-inspection',requireRole(transportRoles), validateRequest(completeTransportInspectionSchema), completeTransportInspection ,);
 
 
 
@@ -108,12 +111,12 @@ router.patch(
 //   inspectJobItem,
 // );
 
-router.patch(
-  '/send-item-to-lab',
-  requireRole(transportRoles),
-  validateRequest(sendItemToLabSchema),
-  sendItemToLab,
-);
+// router.patch(
+//   '/send-item-to-lab',
+//   requireRole(transportRoles),
+//   validateRequest(sendItemToLabSchema),
+//   sendItemToLab,
+// );
 
 
 /*

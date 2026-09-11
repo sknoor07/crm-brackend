@@ -151,7 +151,7 @@ const getServiceCharge = async (
 // Calculate service charge based on repair location
 // --------------------------------------------------
 
-const calculateServiceCharge = async (
+export const calculateServiceCharge = async (
   jobItem: typeof jobItems.$inferSelect,
   tx: DbTransaction,
 ): Promise<number> => {
@@ -319,15 +319,6 @@ export const approveJobItemByCS = async (
 
         createdByUserId:
           changedBy,
-
-        customerApproved:
-          null,
-
-        customerRespondedAt:
-          null,
-
-        status:
-          'estimated',
       })
       .returning();
 
@@ -875,7 +866,7 @@ export const processCSJobApproval = async (
               csUserId,
 
             status:
-              'estimated',
+              'estimate',
           })
           .returning();
 
@@ -1000,9 +991,7 @@ export const processCSJobApproval = async (
               ),
 
             status:
-              hasApprovedItem
-                ? 'final'
-                : 'rejected',
+              'estimate',
           })
           .where(
             eq(

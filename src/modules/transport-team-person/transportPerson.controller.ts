@@ -27,9 +27,10 @@ import type {
   JobItemStatus,
   JobSummaryStatus,
 } from '../../db/schema/job-status.js';
-import { DeliverItemInput, StartDeliveryInput } from './transportPerson.validation.js';
+import { CompleteTransportInspectionInput, DeliverItemInput, StartDeliveryInput } from './transportPerson.validation.js';
 import { allowedJobTransitions } from '../jobstatusandtransitions/status-history.js';
 import { date } from 'zod';
+import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
 
 
 type DbTransaction = Parameters<
@@ -279,6 +280,565 @@ export const getjobdetailswithestimatedquote = async (req: Request<{ id: string 
 
 
 
+export const completeTransportInspection = async (
+  req: Request<{}, {}, CompleteTransportInspectionInput>,
+  res: Response,
+) => {
+  try {
+    const transportPersonId = getUserId(req);
+
+    const {
+      jobId,
+      comment,
+      items,
+    } = req.body;
+
+    /*
+     * --------------------------------------------------
+     * 1. CHECK JOB
+     * --------------------------------------------------
+     */
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(
+            jobs.assignedTransportTeamPersonId,
+            transportPersonId,
+          ),
+        ),
+      )
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found or not assigned to you.',
+      });
+    }
+
+    if (job.currentStatus !== 'pending_visit') {
+      return res.status(400).json({
+        error:
+          `Transport inspection cannot be completed when ` +
+          `job status is ${job.currentStatus}.`,
+      });
+    }
+
+    /*
+     * --------------------------------------------------
+     * 2. GET ALL JOB ITEMS
+     * --------------------------------------------------
+     */
+
+    const existingItems = await db
+      .select()
+      .from(jobItems)
+      .where(eq(jobItems.jobId, jobId));
+
+    if (existingItems.length === 0) {
+      return res.status(400).json({
+        error: 'This job has no items to inspect.',
+      });
+    }
+
+    /*
+     * --------------------------------------------------
+     * 3. FIND ITEMS THAT ACTUALLY NEED INSPECTION
+     * --------------------------------------------------
+     *
+     * Already rejected items are ignored.
+     *
+     * Example:
+     *
+     * Item A -> transport_visit_in_progress
+     * Item B -> repair_rejected
+     * Item C -> transport_visit_in_progress
+     *
+     * Only A and C need inspection.
+     */
+
+    const inspectableItems = existingItems.filter(
+      (item) =>
+        item.currentStatus ===
+        'transport_visit_in_progress',
+    );
+
+    /*
+     * If there are no items left to inspect, the transport
+     * inspection has nothing to process.
+     */
+
+    if (inspectableItems.length === 0) {
+      return res.status(400).json({
+        error:
+          'There are no job items pending transport inspection.',
+      });
+    }
+
+    /*
+     * --------------------------------------------------
+     * 4. VALIDATE SUBMITTED ITEM IDS
+     * --------------------------------------------------
+     */
+
+    const submittedItemIds = items.map(
+      (item) => item.jobItemId,
+    );
+
+    const uniqueSubmittedItemIds =
+      new Set(submittedItemIds);
+
+    if (
+      uniqueSubmittedItemIds.size !==
+      submittedItemIds.length
+    ) {
+      return res.status(400).json({
+        error:
+          'Duplicate job item IDs are not allowed.',
+      });
+    }
+
+    /*
+     * Every item that still needs inspection must
+     * have a decision.
+     */
+
+    if (
+      submittedItemIds.length !==
+      inspectableItems.length
+    ) {
+      return res.status(400).json({
+        error:
+          'Inspection result must be submitted for every job item pending inspection.',
+      });
+    }
+
+    const inspectableItemIds = new Set(
+      inspectableItems.map((item) => item.id),
+    );
+
+    /*
+     * Make sure every submitted item belongs to this job
+     * AND is actually waiting for inspection.
+     */
+
+    const invalidItemId = submittedItemIds.find(
+      (itemId) =>
+        !inspectableItemIds.has(itemId),
+    );
+
+    if (invalidItemId) {
+      const existingItem = existingItems.find(
+        (item) => item.id === invalidItemId,
+      );
+
+      if (existingItem?.currentStatus === 'repair_rejected') {
+        return res.status(400).json({
+          error:
+            `Job item ${invalidItemId} is already rejected ` +
+            `and does not require transport inspection.`,
+        });
+      }
+
+      return res.status(400).json({
+        error:
+          `Job item ${invalidItemId} is not ready for transport inspection.`,
+      });
+    }
+
+    /*
+     * --------------------------------------------------
+     * 5. DETERMINE FINAL ITEM OUTCOMES
+     * --------------------------------------------------
+     *
+     * Previously rejected items remain rejected.
+     *
+     * For items being inspected now:
+     *
+     * onsite -> pending_final_quote
+     * lab    -> pending_lab_receipt
+     * reject -> repair_rejected
+     */
+
+    const inspectionByItemId = new Map(
+      items.map((item) => [
+        item.jobItemId,
+        item,
+      ]),
+    );
+
+    const finalItemOutcomes = existingItems.map(
+      (existingItem) => {
+        /*
+         * Already rejected items remain rejected.
+         */
+
+        if (
+          existingItem.currentStatus ===
+          'repair_rejected'
+        ) {
+          return {
+            jobItemId: existingItem.id,
+            decision: 'reject' as const,
+            finalStatus: 'repair_rejected' as const,
+          };
+        }
+
+        const inspection =
+          inspectionByItemId.get(existingItem.id);
+
+        if (!inspection) {
+          throw new Error(
+            `Missing inspection for job item ${existingItem.id}.`,
+          );
+        }
+
+        if (inspection.decision === 'onsite') {
+          return {
+            jobItemId: existingItem.id,
+            decision: 'onsite' as const,
+            finalStatus:
+              'pending_final_quote' as const,
+          };
+        }
+
+        if (inspection.decision === 'lab') {
+          return {
+            jobItemId: existingItem.id,
+            decision: 'lab' as const,
+            finalStatus:
+              'pending_lab_receipt' as const,
+          };
+        }
+
+        return {
+          jobItemId: existingItem.id,
+          decision: 'reject' as const,
+          finalStatus:
+            'repair_rejected' as const,
+        };
+      },
+    );
+
+    /*
+     * --------------------------------------------------
+     * 6. DETERMINE FINAL JOB FLOW
+     * --------------------------------------------------
+     */
+
+    const hasLabItem = finalItemOutcomes.some(
+      (item) => item.decision === 'lab',
+    );
+
+    const hasOnsiteItem = finalItemOutcomes.some(
+      (item) => item.decision === 'onsite',
+    );
+
+    const hasRepairableItem =
+      hasLabItem || hasOnsiteItem;
+
+    /*
+     * If every item is rejected, we still send the job
+     * through the onsite quote stage so CS can generate
+     * the ₹0 audit quote and subsequently cancel the job.
+     *
+     * Therefore:
+     *
+     * pending_visit
+     *      -> repair_started
+     *      -> pending_final_quote_onsite
+     */
+
+    const firstJobStatus =
+      hasLabItem && !hasOnsiteItem
+        ? 'going_to_lab'
+        : 'repair_started';
+
+    const firstJobNote =
+      comment?.trim() ||
+      (
+        firstJobStatus === 'going_to_lab'
+          ? 'Transport inspection completed. All repairable items require lab repair.'
+          : 'Transport inspection completed.'
+      );
+
+    /*
+     * --------------------------------------------------
+     * 7. TRANSACTION
+     * --------------------------------------------------
+     */
+
+    const result = await db.transaction(
+      async (tx) => {
+        /*
+         * -----------------------------------------------
+         * 7A. FIRST JOB TRANSITION
+         * -----------------------------------------------
+         */
+
+        await transitionJob({
+          jobId,
+          previousStatus: job.currentStatus,
+          newStatus: firstJobStatus,
+          changedBy: transportPersonId,
+          note: firstJobNote,
+
+          updateJob: async (transaction) => {
+            const [updatedJob] = await transaction
+              .update(jobs)
+              .set({
+                currentStatus: firstJobStatus,
+                updatedAt: new Date(),
+              })
+              .where(eq(jobs.id, jobId))
+              .returning();
+
+            return updatedJob;
+          },
+
+          existingTx: tx,
+        });
+
+        /*
+         * -----------------------------------------------
+         * 7B. ITEM TRANSITIONS
+         * -----------------------------------------------
+         *
+         * Only items that were actually pending
+         * inspection are transitioned here.
+         *
+         * Already rejected items are untouched.
+         */
+
+        const updatedItems = [];
+
+        for (const inspection of items) {
+          const existingItem =
+            existingItems.find(
+              (item) =>
+                item.id ===
+                inspection.jobItemId,
+            );
+
+          if (!existingItem) {
+            throw new Error(
+              `Job item ${inspection.jobItemId} not found.`,
+            );
+          }
+
+          let newStatus:
+            | 'pending_final_quote'
+            | 'pending_lab_receipt'
+            | 'repair_rejected';
+
+          if (
+            inspection.decision === 'onsite'
+          ) {
+            newStatus =
+              'pending_final_quote';
+          } else if (
+            inspection.decision === 'lab'
+          ) {
+            newStatus =
+              'pending_lab_receipt';
+          } else {
+            newStatus =
+              'repair_rejected';
+          }
+
+          const itemNote =
+            inspection.comment?.trim() ||
+            (
+              inspection.decision === 'onsite'
+                ? 'Transport inspection completed. Item will be repaired onsite.'
+                : inspection.decision === 'lab'
+                  ? 'Transport inspection completed. Item will be sent to lab.'
+                  : 'Transport inspection completed. Item rejected for repair.'
+            );
+
+          const updatedItem =
+            await updateJobItemWithStatusTransition(
+              existingItem.id,
+              existingItem.currentStatus,
+              newStatus,
+
+              async (transaction) => {
+                const updateData: {
+                  currentStatus:
+                    | 'pending_final_quote'
+                    | 'pending_lab_receipt'
+                    | 'repair_rejected';
+
+                  repairLocation?:
+                    | 'customer_site'
+                    | 'inlab';
+
+                  updatedAt: Date;
+                } = {
+                  currentStatus: newStatus,
+                  updatedAt: new Date(),
+                };
+
+                if (
+                  inspection.decision ===
+                  'onsite'
+                ) {
+                  updateData.repairLocation =
+                    'customer_site';
+                }
+
+                if (
+                  inspection.decision ===
+                  'lab'
+                ) {
+                  updateData.repairLocation =
+                    'inlab';
+                }
+
+                /*
+                 * For rejected items we do not change
+                 * repairLocation.
+                 */
+
+                const [updated] =
+                  await transaction
+                    .update(jobItems)
+                    .set(updateData)
+                    .where(
+                      eq(
+                        jobItems.id,
+                        existingItem.id,
+                      ),
+                    )
+                    .returning();
+
+                return updated;
+              },
+
+              transportPersonId,
+              itemNote,
+              tx,
+            );
+
+          updatedItems.push(updatedItem);
+        }
+
+        /*
+         * -----------------------------------------------
+         * 7C. SECOND JOB TRANSITION
+         * -----------------------------------------------
+         *
+         * If the first transition was repair_started:
+         *
+         * - lab exists
+         *      repair_started -> going_to_lab
+         *
+         * - no lab exists
+         *      repair_started -> pending_final_quote_onsite
+         *
+         * This also handles the all-rejected case.
+         */
+
+        if (
+          firstJobStatus ===
+          'repair_started'
+        ) {
+          const secondJobStatus =
+            hasLabItem
+              ? 'going_to_lab'
+              : 'pending_final_quote_onsite';
+
+          const secondJobNote =
+            hasLabItem
+              ? 'One or more inspected items require lab repair.'
+              : hasRepairableItem
+                ? 'All repairable items are onsite. Final onsite quote is required.'
+                : 'All job items were rejected. A zero-value audit quote is required before job cancellation.';
+
+          await transitionJob({
+            jobId,
+            previousStatus:
+              'repair_started',
+            newStatus:
+              secondJobStatus,
+            changedBy:
+              transportPersonId,
+            note:
+              secondJobNote,
+
+            updateJob:
+              async (transaction) => {
+                const [updatedJob] =
+                  await transaction
+                    .update(jobs)
+                    .set({
+                      currentStatus:
+                        secondJobStatus,
+                      updatedAt:
+                        new Date(),
+                    })
+                    .where(
+                      eq(
+                        jobs.id,
+                        jobId,
+                      ),
+                    )
+                    .returning();
+
+                return updatedJob;
+              },
+
+            existingTx: tx,
+          });
+        }
+
+        /*
+         * -----------------------------------------------
+         * 7D. GET UPDATED JOB
+         * -----------------------------------------------
+         */
+
+        const [updatedJob] =
+          await tx
+            .select()
+            .from(jobs)
+            .where(
+              eq(jobs.id, jobId),
+            )
+            .limit(1);
+
+        return {
+          job: updatedJob,
+          items: updatedItems,
+        };
+      },
+    );
+
+    /*
+     * --------------------------------------------------
+     * 8. RESPONSE
+     * --------------------------------------------------
+     */
+
+    return res.status(200).json({
+      message:
+        'Transport inspection completed successfully.',
+      data: result,
+    });
+  } catch (error) {
+    console.error(
+      'Complete transport inspection error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
 
 
 
@@ -300,6 +860,24 @@ export const getjobdetailswithestimatedquote = async (req: Request<{ id: string 
 
 
 /////////////////////////////////done////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /**
@@ -327,7 +905,7 @@ export const startTransportJobVisit = async (req: Request, res: Response,) => {
         return res.status(403).json({ error: 'You are not assigned to this job.' });
       }
 
-      if (job.currentStatus !== 'in_progress') {
+      if (job.currentStatus !== 'pending_visit') {
         return res.status(400).json({
           error: `Cannot start transport visit for job with status '${job.currentStatus}'.`,
         });

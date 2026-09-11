@@ -1,26 +1,23 @@
+
 export type TransportInspectionDecision =
   | 'onsite'
   | 'lab'
   | 'reject';
 
-export interface TransportInspectionComponentInput {
-  name: string;
-  quantity: number;
-  unitPrice: number;
-}
-
 export interface TransportInspectionItemInput {
   jobItemId: string;
+
+  /**
+   * What should happen to this item after inspection.
+   */
   decision: TransportInspectionDecision;
 
   /**
-   * Components can be edited while the technician
-   * is inspecting the item.
-   */
-  components?: TransportInspectionComponentInput[];
-
-  /**
-   * Optional item-specific inspection comment.
+   * Optional comment about this specific item.
+   *
+   * Example:
+   * "Motherboard needs replacement. Please include it
+   * in the final quote."
    */
   comment?: string;
 }
@@ -29,13 +26,15 @@ export interface TransportInspectionInput {
   jobId: string;
 
   /**
-   * Optional overall inspection comment.
+   * Optional comment about the overall job.
+   *
+   * Example:
+   * "Customer has requested inspection of another device."
    */
   comment?: string;
 
   /**
-   * Every item belonging to the job should be
-   * included in the inspection request.
+   * Inspection decision and optional comment for each item.
    */
   items: TransportInspectionItemInput[];
 }

@@ -2,7 +2,7 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 
 export const repairLocationValues = [
   'customer_site',
-  'lab',
+  'inlab',
 ] as const;
 
 export const repairLocation = pgEnum(
@@ -67,8 +67,11 @@ export const jobItemStatusValues = [
   // Transport / Customer Visit
   'transport_visit_in_progress',
 
-  // Onsite / Quote
+  // Quote
+  // Used for both onsite and in-lab repairs.
+  // repairLocation determines where the repair is happening.
   'pending_final_quote',
+  'removed_from_quote',
 
   // Lab Handover
   'pending_lab_receipt',

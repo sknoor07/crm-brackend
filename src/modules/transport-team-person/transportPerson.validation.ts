@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const jobIdParamsSchema = z.object({
-  jobId: z.string().uuid('Invalid job ID format'),
+  id: z.string().uuid('Invalid job ID format'),
 });
 
 export const startTransportJobSchema = z.object({
@@ -14,24 +14,68 @@ export const startTransportJobSchema = z.object({
     .max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
-export const inspectJobItemSchema = z.object({
-  jobItemId: z.string().uuid('Invalid job item ID format'),
+/**
+ * Transport person inspects the entire job in one request.
+ *
+ * For each item they only decide:
+ * - onsite
+ * - lab
+ * - reject
+ *
+ * Pricing and components are handled later by CS.
+ */
+export const completeTransportInspectionSchema = z.object({
+  jobId: z.string().uuid('Invalid job ID format'),
 
+  /**
+   * Optional job-level comment.
+   *
+   * Used for information that applies to the
+   * overall job, such as requesting an item to
+   * be added or removed.
+   */
   comment: z
     .string()
     .trim()
-    .min(1, 'Inspection comment is required')
-    .max(2000, 'Comment cannot exceed 2000 characters'),
-});
+    .max(
+      2000,
+      'Comment cannot exceed 2000 characters',
+    )
+    .optional(),
 
-export const sendItemToLabSchema = z.object({
-  jobItemId: z.string().uuid('Invalid job item ID format'),
+  /**
+   * Inspection result for every job item.
+   */
+  items: z
+    .array(
+      z.object({
+        jobItemId: z.string().uuid(
+          'Invalid job item ID format',
+        ),
 
-  comment: z
-    .string()
-    .trim()
-    .min(1, 'Lab transfer comment is required')
-    .max(2000, 'Comment cannot exceed 2000 characters'),
+        decision: z.enum([
+          'onsite',
+          'lab',
+          'reject',
+        ]),
+
+        /**
+         * Optional comment specific to this item.
+         */
+        comment: z
+          .string()
+          .trim()
+          .max(
+            2000,
+            'Item comment cannot exceed 2000 characters',
+          )
+          .optional(),
+      }),
+    )
+    .min(
+      1,
+      'At least one item inspection is required',
+    ),
 });
 
 export const requestFinalQuoteSchema = z.object({
@@ -101,6 +145,7 @@ export const startDeliverySchema = z.object({
       'Comment cannot exceed 2000 characters',
     ),
 });
+
 export const deliverItemSchema = z.object({
   jobItemId: z.string().uuid('Invalid job item ID format'),
 
@@ -113,14 +158,13 @@ export const deliverItemSchema = z.object({
       'Comment cannot exceed 2000 characters',
     ),
 });
+
+export type JobIdParamsSchema= z.infer<typeof jobIdParamsSchema>;
 export type StartTransportJobInput =
   z.infer<typeof startTransportJobSchema>;
 
-export type InspectJobItemInput =
-  z.infer<typeof inspectJobItemSchema>;
-
-export type SendItemToLabInput =
-  z.infer<typeof sendItemToLabSchema>;
+export type CompleteTransportInspectionInput =
+  z.infer<typeof completeTransportInspectionSchema>;
 
 export type RequestFinalQuoteInput =
   z.infer<typeof requestFinalQuoteSchema>;

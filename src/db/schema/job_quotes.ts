@@ -1,15 +1,25 @@
 import {
+  pgEnum,
   pgTable,
   uuid,
   decimal,
   timestamp,
   integer,
-  varchar,
   unique,
 } from 'drizzle-orm/pg-core';
 
 import { jobs } from './jobs.js';
 import { users } from './users.js';
+
+export const jobQuoteStatus = pgEnum(
+  'job_quote_status',
+  [
+    'estimate',
+    'pending',
+    'final',
+    'rejected',
+  ],
+);
 
 export const jobQuotes = pgTable(
   'job_quotes',
@@ -51,11 +61,9 @@ export const jobQuotes = pgTable(
       .references(() => users.id)
       .notNull(),
 
-    status: varchar('status', {
-      length: 20,
-    })
+    status: jobQuoteStatus('status')
       .notNull()
-      .default('estimated'),
+      .default('estimate'),
 
     createdAt: timestamp('created_at')
       .defaultNow()

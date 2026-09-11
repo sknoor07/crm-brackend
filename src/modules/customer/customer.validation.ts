@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const quoteResponseSchema = z.object({
-  jobItemId: z.string().uuid('Invalid job item ID format'),
+  jobId: z.string().uuid('Invalid job item ID format'),
 
   decision: z.enum(['accept', 'reject'], {
     message:

@@ -45,10 +45,6 @@ export const jobItemQuotes = pgTable('job_item_quotes', {
     .references(() => users.id)
     .notNull(),
 
-  customerApproved: boolean('customer_approved'),
-
-  customerRespondedAt: timestamp('customer_responded_at'),
-
   status: varchar('status', {
     length: 20,
   })

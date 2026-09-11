@@ -17,10 +17,10 @@ import {
   closeJobRequest,
 
   approveJobByCS,
-  getPendingFinalQuotesOnSite,
   searchCustomers,
   seacrhCustomerDetailswithJob,
   getjobDetails,
+  getPendingFinalQuotes,
 } from './cs.controller.js';
 
 import {
@@ -65,6 +65,7 @@ router.get(
   searchCustomers,
 );
 
+// final close after talking with customer
 router.get(
   '/ready-for-closure',
   requireRole(csRoles),
@@ -95,6 +96,11 @@ router.get(
 )
 
 
+router.get(
+  '/pending-final-quotes',
+  requireRole(csRoles),
+  getPendingFinalQuotes,
+);
 
 
 
@@ -120,11 +126,6 @@ router.patch(
   generateFinalQuote,
 );
 
-router.get(
-  '/pending-final-quotes-onsite',
-  requireRole(csRoles),
-  getPendingFinalQuotesOnSite,
-);
 
 
 

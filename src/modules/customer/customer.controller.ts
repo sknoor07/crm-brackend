@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import {jobs,jobItems,jobComments,deviceServiceCharges, jobItemStatusHistory, jobStatusHistory,} from '../../db/schema/index.js';
+import {jobs,jobItems,jobComments,deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes,} from '../../db/schema/index.js';
 
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 
@@ -208,150 +208,291 @@ export const createCustomerJob = async (
  *
  * Only the JOB ITEM changes status.
  */
-export const respondToQuote = async (req: Request<{},{},QuoteResponseInput>,res: Response,) => {
-  try {
-    const {jobItemId,decision,comment,} = req.body;
 
-    const userId =req.user?.userId;
+export const respondToQuote = async (
+  req: Request<{}, {}, QuoteResponseInput>,
+  res: Response,
+) => {
+  try {
+    const {
+      jobId,
+      decision,
+      comment,
+    } = req.body;
+
+    const userId = req.user?.userId;
 
     if (!userId) {
-      return res.status(401).json({error:'Authentication required',});
+      return res.status(401).json({
+        error: 'Authentication required',
+      });
     }
 
+    const roles = req.user?.roles ?? [];
 
-    /* ---------------------------------------------------------
-       Find the specific repair item
-       --------------------------------------------------------- */
+    // ---------------------------------------------------------
+    // Find job
+    // ---------------------------------------------------------
 
-    const [jobItem] =
-      await db
-        .select({id: jobItems.id,
-          jobId:jobItems.jobId,
-          currentStatus:jobItems.currentStatus,
-          isFinalQuoteApproved:jobItems.isFinalQuoteApproved,
-        })
-        .from(jobItems)
-        .where(eq(jobItems.id,jobItemId,),)
-        .limit(1);
-
-    if (!jobItem) {
-      return res.status(404).json({error:'Job item not found',});
-    }
-
-
-    /* ---------------------------------------------------------
-       Find parent job
-       --------------------------------------------------------- */
-
-    const [job] =
-      await db
-        .select({id: jobs.id,customerId:jobs.customerId,})
-        .from(jobs)
-        .where(
-          eq(jobs.id,jobItem.jobId))
-        .limit(1);
+    const [job] = await db
+      .select({
+        id: jobs.id,
+        customerId: jobs.customerId,
+      })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
 
     if (!job) {
-      return res.status(404).json({error:'Job not found',});
+      return res.status(404).json({
+        error: 'Job not found',
+      });
     }
 
+    // ---------------------------------------------------------
+    // Verify customer ownership
+    // ---------------------------------------------------------
 
-    /* ---------------------------------------------------------
-       Verify customer ownership
-       --------------------------------------------------------- */
-
-    const roles =req.user?.roles ?? [];
-
-    /*
-     * Admin/employee users may be allowed through the route
-     * depending on the application's authorization rules.
-     *
-     * A normal customer can only respond to their own job.
-     */
-    if (roles.includes('customer') &&job.customerId !== userId) {
-      return res.status(403).json({error:'You can only respond to quotes for your own jobs'});
+    if (
+      roles.includes('customer') &&
+      job.customerId !== userId
+    ) {
+      return res.status(403).json({
+        error:
+          'You can only respond to quotes for your own jobs',
+      });
     }
 
+    // ---------------------------------------------------------
+    // Find latest quote for the job
+    // ---------------------------------------------------------
 
-    /* ---------------------------------------------------------
-       Validate current item status
-       --------------------------------------------------------- */
+    const [latestQuote] = await db
+      .select()
+      .from(jobQuotes)
+      .where(eq(jobQuotes.jobId, jobId))
+      .orderBy(desc(jobQuotes.version))
+      .limit(1);
 
-    if (jobItem.currentStatus !=='awaiting_customer_approval') {
-      return res.status(400).json({error:`Cannot respond to quote. Job item is currently in '${jobItem.currentStatus}' state.`});
+    if (!latestQuote) {
+      return res.status(404).json({
+        error: 'Quote not found for this job',
+      });
     }
 
+    // ---------------------------------------------------------
+    // Quote must be pending
+    // ---------------------------------------------------------
 
-    /* ---------------------------------------------------------
-       Determine new item status
-       --------------------------------------------------------- */
+    if (latestQuote.status !== 'pending') {
+      return res.status(400).json({
+        error:
+          `Cannot respond to quote. Quote is currently '${latestQuote.status}'.`,
+      });
+    }
 
-    const newStatus =decision === 'accept'? 'repair_authorized': 'repair_rejected';
+    // ---------------------------------------------------------
+    // Get all items belonging to this quote
+    // ---------------------------------------------------------
 
+    const quotedItems = await db
+      .select({
+        jobItemId: jobItemQuotes.jobItemId,
+        jobItemQuoteId: jobItemQuotes.id,
+        repairLocation: jobItems.repairLocation,
+        currentStatus: jobItems.currentStatus,
+      })
+      .from(jobItemQuotes)
+      .innerJoin(
+        jobItems,
+        eq(
+          jobItems.id,
+          jobItemQuotes.jobItemId,
+        ),
+      )
+      .where(
+        eq(
+          jobItemQuotes.jobQuoteId,
+          latestQuote.id,
+        ),
+      );
 
-    /**
-     * IMPORTANT:
-     *
-     * Customer acceptance should first move the item to:
-     *
-     *     repair_authorized
-     *
-     * Then the appropriate repair/transport person explicitly
-     * starts the repair:
-     *
-     *     repair_authorized
-     *             ↓
-     *     repair_in_progress
-     *
-     * This follows the workflow defined for the project.
-     */
+    if (quotedItems.length === 0) {
+      return res.status(400).json({
+        error:
+          'The quote does not contain any job items',
+      });
+    }
 
+    // ---------------------------------------------------------
+    // Customer decision
+    // ---------------------------------------------------------
 
-    /* ---------------------------------------------------------
-       Update item and create status history/comment
-       --------------------------------------------------------- */
+    const accepted = decision === 'accept';
 
-    const updatedJobItem =
-      await updateJobItemWithStatusTransition(jobItem.id,jobItem.currentStatus,newStatus,
-        async (tx) => {
-          const [result] =
-            await tx.update(jobItems)
-              .set({currentStatus:newStatus,
-                isFinalQuoteApproved:decision === 'accept',
-                updatedAt:new Date(),
-              })
-              .where(eq(jobItems.id,jobItem.id,),)
-              .returning();
+    const updatedItems: (typeof jobItems.$inferSelect)[] = [];
 
+    await db.transaction(async (tx) => {
+      // -------------------------------------------------------
+      // Update job quote status
+      // -------------------------------------------------------
 
-          /* ---------------------------------------------------
-             Customer comment is optional.
-             --------------------------------------------------- */
+      await tx
+        .update(jobQuotes)
+        .set({
+          status: accepted
+            ? 'final'
+            : 'rejected',
+        })
+        .where(
+          eq(
+            jobQuotes.id,
+            latestQuote.id,
+          ),
+        );
 
-          if (comment?.trim()) {
-            await tx
-              .insert(jobComments)
-              .values({jobItemId:jobItem.id,userId,comment:comment.trim()});
-          }
-          return result;
-        },
+      // -------------------------------------------------------
+      // Approve / reject every item in this quote
+      // -------------------------------------------------------
+
+      for (const item of quotedItems) {
+        if (!accepted) {
+          const updatedItem =
+            await updateJobItemWithStatusTransition(
+              item.jobItemId,
+              item.currentStatus,
+              'pending_final_quote',
+              async (transaction) => {
+                const [result] =
+                  await transaction
+                    .update(jobItems)
+                    .set({
+                      // IMPORTANT:
+                      // The helper only validates/logs the
+                      // transition. We must update the actual
+                      // current status here.
+                      currentStatus:
+                        'pending_final_quote',
+
+                      isFinalQuoteApproved: false,
+
+                      onsiteRepairAuthorized: false,
+
+                      updatedAt: new Date(),
+                    })
+                    .where(
+                      eq(
+                        jobItems.id,
+                        item.jobItemId,
+                      ),
+                    )
+                    .returning();
+
+                return result;
+              },
+              userId,
+              comment?.trim() ||
+                'Customer rejected the final quote. Quote returned for negotiation.',
+              tx,
+            );
+
+          updatedItems.push(updatedItem);
+
+          continue;
+        }
+
+        // -----------------------------------------------------
+        // Customer accepted the entire job quote
+        // -----------------------------------------------------
+
+        const newStatus =
+          item.repairLocation === 'customer_site'
+            ? 'assigned_to_repair_person'
+            : 'transport_visit_in_progress';
+
+        const itemComment =
+          item.repairLocation === 'customer_site'
+            ? 'Customer approved the final quote. Onsite repair is authorized.'
+            : 'Customer approved the final quote. Item can proceed to lab transport.';
+
+        const updatedItem =
+          await updateJobItemWithStatusTransition(
+            item.jobItemId,
+            item.currentStatus,
+            newStatus,
+            async (transaction) => {
+              const [result] =
+                await transaction
+                  .update(jobItems)
+                  .set({
+                    currentStatus: newStatus,
+
+                    isFinalQuoteApproved: true,
+
+                    onsiteRepairAuthorized:
+                      item.repairLocation ===
+                      'customer_site',
+
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    eq(
+                      jobItems.id,
+                      item.jobItemId,
+                    ),
+                  )
+                  .returning();
+
+              return result;
+            },
+            userId,
+            comment?.trim() || itemComment,
+            tx,
+          );
+
+        updatedItems.push(updatedItem);
+      }
+
+      // -------------------------------------------------------
+      // Job-level customer comment
+      // -------------------------------------------------------
+
+      await tx.insert(jobComments).values({
+        jobId,
         userId,
-
-        /*
-         * Mandatory workflow-action comment.
-         *
-         * The helper stores this in job_comments and
-         * job_item_status_history.
-         */
-        decision === 'accept'? 'Customer approved the final quote.': 'Customer rejected the final quote.');
-
+        comment:
+          comment?.trim() ||
+          (
+            accepted
+              ? 'Customer approved the final job quote.'
+              : 'Customer rejected the final job quote.'
+          ),
+      });
+    });
 
     return res.status(200).json({
-      message:decision === 'accept'? 'Quote accepted successfully. Repair is now authorized.': 'Quote rejected successfully.',
-      jobItem:updatedJobItem,
+      message: accepted
+        ? 'Quote approved successfully. The job items can now proceed.'
+        : 'Quote rejected successfully.',
+      quote: {
+        id: latestQuote.id,
+        version: latestQuote.version,
+        status: accepted
+          ? 'final'
+          : 'rejected',
+      },
+      jobItems: updatedItems,
     });
-  } catch (error) {console.error('Quote response error:',error,);
+  } catch (error) {
+    console.error(
+      'Quote response error:',
+      error,
+    );
 
-    return res.status(500).json({error:'Internal server error while responding to quote',});
+    return res.status(500).json({
+      error:
+        'Internal server error while responding to quote',
+    });
   }
 };
+

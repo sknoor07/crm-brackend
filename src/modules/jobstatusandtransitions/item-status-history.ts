@@ -27,6 +27,7 @@ export const allowedJobItemTransitions: Record<
   // Initial
   created: [
     'pending_cs_verification',
+    'awaiting_customer_approval',
   ],
 
   // CS approval
@@ -69,6 +70,7 @@ export const allowedJobItemTransitions: Record<
     'assigned_to_repair_manager',
   ],
 
+  
   // Repair person
   assigned_to_repair_person: [
     'pending_final_quote',
@@ -79,6 +81,7 @@ export const allowedJobItemTransitions: Record<
   pending_final_quote: [
     'awaiting_customer_approval',
     'ready_for_delivery',
+    'removed_from_quote',
   ],
 
   // Customer approval
