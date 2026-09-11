@@ -2,50 +2,63 @@ import {
   pgTable,
   uuid,
   decimal,
-  timestamp,
-  integer,
   boolean,
+  timestamp,
   varchar,
-  unique,
 } from 'drizzle-orm/pg-core';
 
 import { jobItems } from './job-items.js';
 import { users } from './users.js';
+import { jobQuotes } from './job_quotes.js';
 
-export const jobItemQuotes = pgTable('job_item_quotes',{
-    id: uuid('id').defaultRandom().primaryKey(),
+export const jobItemQuotes = pgTable('job_item_quotes', {
+  id: uuid('id')
+    .defaultRandom()
+    .primaryKey(),
 
-    jobItemId: uuid('job_item_id').references(() => jobItems.id).notNull(),
-    
-    version: integer('version').notNull(),
+  jobQuoteId: uuid('job_quote_id')
+    .references(() => jobQuotes.id, {
+      onDelete: 'cascade',
+    })
+    .notNull(),
 
-    componentsCost: decimal('components_cost',{precision: 10,scale: 2,},).notNull(),
+  jobItemId: uuid('job_item_id')
+    .references(() => jobItems.id)
+    .notNull(),
 
-    serviceCharge: decimal('service_charge',{precision: 10,scale: 2,},).notNull(),
+  componentsCost: decimal('components_cost', {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
 
-    totalAmount: decimal('total_amount',{precision: 10,scale: 2,},).notNull(),
+  serviceCharge: decimal('service_charge', {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
 
-    createdByUserId: uuid('created_by_user_id',).references(() => users.id).notNull(),
+  totalAmount: decimal('total_amount', {
+    precision: 10,
+    scale: 2,
+  }).notNull(),
 
-    customerApproved: boolean('customer_approved',),
+  createdByUserId: uuid('created_by_user_id')
+    .references(() => users.id)
+    .notNull(),
 
-    customerRespondedAt: timestamp('customer_responded_at',),
+  customerApproved: boolean('customer_approved'),
 
-    status: varchar('status', {length: 30,}).notNull().default('pending_customer_approval'),
+  customerRespondedAt: timestamp('customer_responded_at'),
 
-    createdAt: timestamp('created_at',).defaultNow().notNull(),
-  },
+  status: varchar('status', {
+    length: 20,
+  })
+    .notNull()
+    .default('estimated'),
 
-  (table) => ({
-    quoteVersionUnique: unique().on(
-      table.jobItemId,
-      table.version,
-    ),
-  }),
-);
+  createdAt: timestamp('created_at')
+    .defaultNow()
+    .notNull(),
+});
 
-export type JobItemQuote =
-  typeof jobItemQuotes.$inferSelect;
-
-export type NewJobItemQuote =
-  typeof jobItemQuotes.$inferInsert;
+export type JobItemQuote = typeof jobItemQuotes.$inferSelect;
+export type NewJobItemQuote = typeof jobItemQuotes.$inferInsert;

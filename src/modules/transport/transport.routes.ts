@@ -8,6 +8,7 @@ import {
   assignDelivery,
   getRepairManagers,
   assignRepairManager,
+  getPickUpPersonList,
 } from './transport.controller.js';
 
 import {
@@ -28,7 +29,6 @@ const router = Router();
 router.use(
   requireAuth,
   requireRole([
-    'admin',
     'transport_manager',
   ]),
 );
@@ -41,6 +41,28 @@ router.get(
   '/pending',
   getPendingPickups,
 );
+
+router.get(
+  '/pickup-persons',
+  getPickUpPersonList,
+);
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////done/////////////////////////////////////
+
+
+
+
+
 
 
 /**

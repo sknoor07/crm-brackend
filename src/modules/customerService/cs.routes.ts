@@ -15,7 +15,6 @@ import {
   getJobsWaitingForCSApproval,
   getJobsWaitingToBeClosed,
   closeJobRequest,
-  getPendingOnsiteConfirmations,
 
   approveJobByCS,
   getPendingFinalQuotesOnSite,
@@ -129,11 +128,11 @@ router.get(
 
 
 
-router.get(
-  '/pending-onsite-confirmation',
-  requireRole(csRoles),
-  getPendingOnsiteConfirmations,
-);
+// router.get(
+//   '/pending-onsite-confirmation',
+//   requireRole(csRoles),
+//   getPendingOnsiteConfirmations,
+// );
 
 // router.patch(
 //   '/confirm-onsite-repair',

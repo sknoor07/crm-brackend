@@ -24,104 +24,92 @@ export const allowedJobItemTransitions: Record<
   string,
   JobItemStatus[]
 > = {
+  // Initial
   created: [
-    'pending_cs_verification',//g
+    'pending_cs_verification',
   ],
 
+  // CS approval
   pending_cs_verification: [
-    'approved_for_transport',//g
-    'repair_rejected',//g
+    'approved_for_transport',
+    'repair_rejected',
   ],
 
+  // Transport
   approved_for_transport: [
-    'transport_visit_in_progress',//g
+    'transport_visit_in_progress',
   ],
 
+  // Transport decides where the item goes
   transport_visit_in_progress: [
-    'repair_rejected',         
-    'pending_final_quote_onsite',//onsite
-    'pending_lab_receipt',//onsite to inlab
-  ],
-
-  pending_final_quote_onsite: [//cs team will have this status 
-    'awaiting_customer_approval', //customer will approve after getting quote
-    'repair_rejected', //or may be the cs team reejcts the repair after communication with transport_person
-  ],
-
-  pending_lab_receipt: [
-    'received_at_lab', //both transport_person and transport_manager will ahve this status 
-  ],
-
-  received_at_lab: [ //transport_manager will mark item as received at lab 
-    'pending_repair_assignment',
-  ],
-
-  pending_repair_assignment: [ // repair_manager will assign to someone to repair
-    'assigned_to_repair_person', 
-  ],
-
-  assigned_to_repair_person: [ // assigned repair peroson
-    'pending_final_quote_inlab',    //the assigned repair person can either send the job for revised quoatation
-    'reapir_finished',   //or he can finish the job may be unrepaired or no need for quotation or finish after customer accepted the quotataion
-  ],
-
-  pending_final_quote_inlab: [
-    'awaiting_customer_approval', //cs team sends the final quoate for approval 
-    'inlab_repair_rejected',  //or may be repair rejected and will send to transport_manager to send back
-  ],
-
-
-  inlab_repair_rejected:[
-    'ready_for_delivery' // if after final quote customer does not accepts then cs team will send the item for return
-  ]
-  awaiting_customer_approval: [ // customer can have both status for inlab and onsite as per the location the options will be available
-    'repair_authorized_onsite', // //customer see the quote and approves 
-    'repair_authorised_inlab', // cutomer authorised the reapir
-    'customer_onsite_repair_reject',
-    'customer_inlab_repair_reject'
-  ],
-
-  customer_inlab_repair_reject:[
-    'pending_final_quote_inlab',
-  ]
-
-  customer_onsite_repair_reject:[
-    pending_final_quote_onsite,
-  ]
-
-  repair_authorised_inlab:[
-    'assigned_to_repair_person',// if customer authorised the reapir then notify the repair perosn too start the job.
-  ]
-  repair_authorized_onsite:[ // repair person onsite see and repair and delivers
     'delivered',
+    'repair_rejected',
+    'pending_final_quote',
+    'pending_lab_receipt',
   ],
 
-  reapir_finished:[
-    'pending_repair_manager_inspection', //repair manaegr will inspeact
-    
-  ]
-
-  pending_repair_manager_inspection: [ 
-    'pending_repair_assignment', // after isnpeaction can assign someone else to fix
-    'ready_for_delivery', // go for delivery
-    'assigned_to_repair_person', // asign the same persont o fix
+  // Lab handover
+  pending_lab_receipt: [
+    'received_at_lab',
   ],
 
-  ready_for_delivery: [ // transport manager will asssign someone to deliver
-    'out_for_delivery', 
+  received_at_lab: [
+    'assigned_to_repair_manager',
   ],
 
-  out_for_delivery: [ // transport_person will transition from out_for_deliver to delivered
+  // Repair manager
+  assigned_to_repair_manager: [
+    'assigned_to_repair_person',
+    'ready_for_delivery',
+    'third_party_repair',
+  ],
+
+  // Third-party vendor
+  third_party_repair: [
+    'assigned_to_repair_manager',
+  ],
+
+  // Repair person
+  assigned_to_repair_person: [
+    'pending_final_quote',
+    'assigned_to_repair_manager',
+  ],
+
+  // Quote
+  pending_final_quote: [
+    'awaiting_customer_approval',
+    'ready_for_delivery',
+  ],
+
+  // Customer approval
+  awaiting_customer_approval: [
+    'assigned_to_repair_person',
+    'transport_visit_in_progress',
+    'pending_final_quote',
+  ],
+
+  // Repair manager inspection
+  pending_repair_manager_inspection: [
+    'assigned_to_repair_person',
+    'ready_for_delivery',
+  ],
+
+  // Delivery
+  ready_for_delivery: [
+    'out_for_delivery',
+  ],
+
+  out_for_delivery: [
     'delivered',
   ],
 
   delivered: [],
 
+  // Terminal
   repair_rejected: [],
 
   cancelled: [],
 };
-
 
 // --------------------------------------------------
 // Update job item with status transition

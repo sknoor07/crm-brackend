@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   inArray,
+  sql,
 } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
@@ -33,6 +34,7 @@ import type {
 } from '../../db/schema/job-status.js';
 import { error } from 'node:console';
 import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
+import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
 
 
 /* =========================================================
@@ -49,11 +51,11 @@ import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/it
  * transport-team operations.
  */
 const isActiveTransportPerson = async (userId: string,) => {
-  const [employee] = await db.select({id: users.id,})
+  const [employee] = await db.select({ id: users.id, })
     .from(users)
-    .innerJoin(userRoles,eq(userRoles.userId, users.id),)
-    .innerJoin(roles,eq(userRoles.roleId, roles.id),)
-    .where(and(eq(users.id, userId),eq(users.userType, 'employee'),eq(users.isActive, true),inArray(roles.name, ['transport_team_person',]),),)
+    .innerJoin(userRoles, eq(userRoles.userId, users.id),)
+    .innerJoin(roles, eq(userRoles.roleId, roles.id),)
+    .where(and(eq(users.id, userId), eq(users.userType, 'employee'), eq(users.isActive, true), inArray(roles.name, ['transport_team_person',]),),)
     .limit(1);
 
   return Boolean(employee);
@@ -110,8 +112,8 @@ const recordItemStatusChange = async (
 /**
  * Add a job-level comment.
  */
-const addJobComment = async (tx: any,jobId: string,userId: string,comment: string,) => {
-  await tx.insert(jobComments).values({jobId,userId,comment,});
+const addJobComment = async (tx: any, jobId: string, userId: string, comment: string,) => {
+  await tx.insert(jobComments).values({ jobId, userId, comment, });
 };
 
 
@@ -150,17 +152,17 @@ export const getPendingPickups = async (req: Request, res: Response) => {
 
     // 1. Fetch jobs, items, and customers together in a single query
     const rawResults = await db.select({
-        job: jobs,
-        jobItem: jobItems,
-        customerProfile: customerProfiles
-      })
+      job: jobs,
+      jobItem: jobItems,
+      customerProfile: customerProfiles
+    })
       .from(jobs)
       .innerJoin(jobItems, eq(jobItems.jobId, jobs.id))
       // Use leftJoin so jobs still load even if a customer profile is missing
-      .leftJoin(customerProfiles, eq(jobs.customerId, customerProfiles.userId)) 
+      .leftJoin(customerProfiles, eq(jobs.customerId, customerProfiles.userId))
       .where(
         and(
-          eq(jobs.currentStatus, 'in_progress'),
+          eq(jobs.currentStatus, 'assigning_pickup_Engineer'),
           eq(jobItems.currentStatus, 'approved_for_transport')
         )
       )
@@ -190,32 +192,27 @@ export const getPendingPickups = async (req: Request, res: Response) => {
     // Convert the Map back to a clean array
     const groupedJobs = Array.from(jobsMap.values());
 
-    return res.status(200).json({ 
-      count: groupedJobs.length, 
-      jobs: groupedJobs 
+    return res.status(200).json({
+      count: groupedJobs.length,
+      jobs: groupedJobs
     });
-    
+
   } catch (error) {
     console.error('Fetch pending transport jobs error:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-
-/* =========================================================
-   2. ASSIGN WHOLE JOB TO TRANSPORT PERSON
-   ========================================================= */
-
 /**
 Assign a pending job to a transport team person.
  */
-export const assignTransportPerson = async (req: Request<{},{},AssignTransportPersonInput>,res: Response,) => {
+export const assignTransportPerson = async (req: Request<{}, {}, AssignTransportPersonInput>, res: Response,) => {
   try {
-    const {jobId,transportPersonId,comment,} = req.body;
-    const transportManagerId =req.user?.userId;
+    const { jobId, transportPersonId, comment, } = req.body;
+    const transportManagerId = req.user?.userId;
 
     if (!transportManagerId) {
-      return res.status(401).json({error:'Authenticated user not found',});
+      return res.status(401).json({ error: 'Authenticated user not found', });
     }
 
     /* -----------------------------------------------------
@@ -225,27 +222,26 @@ export const assignTransportPerson = async (req: Request<{},{},AssignTransportPe
     const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1);
 
     if (!job) {
-      return res.status(404).json({error: 'Job not found',});
+      return res.status(404).json({ error: 'Job not found', });
     }
 
-    if(job.assignedTransportTeamPersonId!==null){
-      return res.status(400).json({error:"Job Already Assigned"})
+    if (job.assignedTransportTeamPersonId !== null) {
+      return res.status(400).json({ error: "Job Already Assigned" })
     }
 
     /* -----------------------------------------------------
        Job must still be active
        ----------------------------------------------------- */
 
-    if (job.currentStatus !=='in_progress') {
-      return res.status(400).json({error:`Job cannot be assigned in '${job.currentStatus}' status.`,});
+    if (job.currentStatus !== 'assigning_pickup_Engineer') {
+      return res.status(400).json({ error: `Job cannot be assigned in '${job.currentStatus}' status.`, });
     }
     /* -----------------------------------------------------
        Validate transport person
        ----------------------------------------------------- */
 
-    if (!(await isActiveTransportPerson(transportPersonId,))) 
-      {
-      return res.status(400).json({error:'Assigned person must be an active employee with the transport_team_person role.',});
+    if (!(await isActiveTransportPerson(transportPersonId,))) {
+      return res.status(400).json({ error: 'Assigned person must be an active employee with the transport_team_person role.', });
     }
 
     /* -----------------------------------------------------
@@ -253,38 +249,136 @@ export const assignTransportPerson = async (req: Request<{},{},AssignTransportPe
        ----------------------------------------------------- */
 
     const items = await getJobItems(jobId);
-
     if (items.length === 0) {
-      return res.status(400).json({error:'Cannot assign transport person because the job has no items.',});
+      return res.status(400).json({ error: 'Cannot assign transport person because the job has no items.', });
     }
 
-    const hasItemsWaitingForTransport =items.some((item) =>item.currentStatus ==='approved_for_transport',);
+    const itemsWaitingForTransport = items.filter((item) => item.currentStatus === 'approved_for_transport',);
 
-    if (!hasItemsWaitingForTransport) {
-      return res.status(400).json({error:'Job has no items waiting for transport.',});
+    if (itemsWaitingForTransport.length === 0) {
+      return res.status(400).json({ error: 'Job has no items waiting for transport.', });
     }
 
     /* -----------------------------------------------------
        Assign transport person
        ----------------------------------------------------- */
 
-    const updatedJob =await db.transaction(
+    const result = await db.transaction(
       async (tx) => {
-        const [result] = await tx.update(jobs)
-        .set({transportManagerId,assignedTransportTeamPersonId:transportPersonId,updatedAt: new Date(),})
-          .where(eq(jobs.id, jobId),)
-          .returning();
+        const updatedJob = await transitionJob({
+          jobId: job.id,
+          previousStatus: job.currentStatus,
+          newStatus: 'pending_visit',
+          changedBy: transportManagerId,
+          note: comment.trim(),
+          existingTx: tx,
 
-        await addJobComment(tx,jobId,transportManagerId,comment,);
-        return result;
-      });
 
-    return res.status(200).json({message:'Job successfully assigned to the transport team person.',job: updatedJob,});
-  } catch (error) {console.error('Assign transport person error:',error,);
+          updateJob: async (tx) => {
+            const [updated] = await tx.update(jobs).set({ transportManagerId, assignedTransportTeamPersonId: transportPersonId, currentStatus: 'pending_visit', updatedAt: new Date(), })
+              .where(eq(jobs.id, jobId),).returning();
+            if (!updated) {
+              throw new Error('Failed to update job',);
+            }
+            return updated;
+          },
+        });
 
-    return res.status(500).json({error: 'Internal server error',});
+
+        const updatedItems = [];
+
+        for (const item of itemsWaitingForTransport) {
+          const updatedItem = await updateJobItemWithStatusTransition(
+            item.id,
+            item.currentStatus,
+            'transport_visit_in_progress',
+
+            async (tx) => {
+              const [updated] = await tx.update(jobItems).set({ currentStatus: 'transport_visit_in_progress', updatedAt: new Date(), })
+                .where(eq(jobItems.id, item.id),).returning();
+              if (!updated) {
+                throw new Error('Failed to Update Job Items');
+              }
+              return updated;
+            },
+            transportManagerId,
+            comment.trim(),
+            tx,
+          );
+          updatedItems.push(updatedItem);
+        }
+
+        return { job: updatedJob, items: updatedItems };
+
+      },
+
+    );
+    return res.status(200).json({ message: 'Transport person assigned successfully.', job: result.job, items: result.items, });
+
+
+  } catch (error) {
+    console.error('Assign transport person error:', error,);
+
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to assign transport person', });
   }
 };
+
+
+/*Get list of pickup person */
+
+export const getPickUpPersonList = async (req: Request, res: Response) => {
+  try {
+    const pickupPersonDetails = await db
+      .select({
+        userId: users.id,
+        email: users.email,
+        userType: users.userType,
+        firstName: employeeProfiles.firstName,
+        lastName: employeeProfiles.lastName,
+        fullName: sql<string>`${employeeProfiles.firstName} || ' ' || ${employeeProfiles.lastName}`,
+        phone: employeeProfiles.phone,
+        specializations: employeeProfiles.specializations,
+      })
+      .from(users)
+      .innerJoin(employeeProfiles, eq(users.id, employeeProfiles.userId))
+      .innerJoin(userRoles, eq(users.id, userRoles.userId))
+      .innerJoin(roles, eq(userRoles.roleId, roles.id))
+      .where(
+        and(
+          eq(users.userType, 'employee'),
+          eq(roles.name, 'transport_team_person')
+        )
+      );
+    res.status(200).json({ message: "Employee Fetch Successfully", pickupPersonDetails });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "cannot fetch transportpersons" });
+  }
+}
+
+
+
+
+
+
+
+///////////////////////done////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /* =========================================================
@@ -302,14 +396,14 @@ export const assignTransportPerson = async (req: Request<{},{},AssignTransportPe
  *
  * This is an ITEM-level transition.
  */
-export const receiveAtLab = async (req: Request<{},{},ReceiveLabInput>,res: Response,) => {
+export const receiveAtLab = async (req: Request<{}, {}, ReceiveLabInput>, res: Response,) => {
   try {
-    const {jobItemId,comment,} = req.body;
+    const { jobItemId, comment, } = req.body;
 
-    const transportManagerId =req.user?.userId;
+    const transportManagerId = req.user?.userId;
 
     if (!transportManagerId) {
-      return res.status(401).json({error:'Authenticated user not found',});
+      return res.status(401).json({ error: 'Authenticated user not found', });
     }
 
     /* -----------------------------------------------------
@@ -319,19 +413,19 @@ export const receiveAtLab = async (req: Request<{},{},ReceiveLabInput>,res: Resp
     const [item] = await db
       .select()
       .from(jobItems)
-      .where(eq(jobItems.id,jobItemId,),)
+      .where(eq(jobItems.id, jobItemId,),)
       .limit(1);
 
     if (!item) {
-      return res.status(404).json({error:'Job item not found',});
+      return res.status(404).json({ error: 'Job item not found', });
     }
 
     /* -----------------------------------------------------
        Validate status
        ----------------------------------------------------- */
 
-    if (item.currentStatus !=='pending_lab_receipt') {
-      return res.status(400).json({error:`Item cannot be received at lab from '${item.currentStatus}' status.`,});
+    if (item.currentStatus !== 'pending_lab_receipt') {
+      return res.status(400).json({ error: `Item cannot be received at lab from '${item.currentStatus}' status.`, });
     }
 
     /* -----------------------------------------------------
@@ -357,10 +451,11 @@ export const receiveAtLab = async (req: Request<{},{},ReceiveLabInput>,res: Resp
       comment || 'Item received at the lab'
     );
 
-    return res.status(200).json({message:'Item successfully received at the lab.',item: updatedItem,});
-  } catch (error) {console.error('Receive item at lab error:',error,);
+    return res.status(200).json({ message: 'Item successfully received at the lab.', item: updatedItem, });
+  } catch (error) {
+    console.error('Receive item at lab error:', error,);
 
-    return res.status(500).json({error:'Internal server error while receiving item at lab',});
+    return res.status(500).json({ error: 'Internal server error while receiving item at lab', });
   }
 };
 

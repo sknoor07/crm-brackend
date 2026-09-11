@@ -20,9 +20,11 @@ export type RepairLocation =
 export const jobSummaryStatusValues = [
   'created',
   'in_progress',
+  'repair_started',
 
   'assigning_pickup_Engineer',
 
+  'pending_visit',
   'repair_completed_onsite',
 
   'going_to_lab',
@@ -57,41 +59,33 @@ export type JobSummaryStatus =
  * Workflow of an individual repairable item.
  */
 export const jobItemStatusValues = [
-  // CS
+  // Initial / CS
   'created',
   'pending_cs_verification',
   'approved_for_transport',
 
-  // Transport / customer visit
+  // Transport / Customer Visit
   'transport_visit_in_progress',
-  'transport_inspection',
-  'pending_final_quote_onsite',
+
+  // Onsite / Quote
+  'pending_final_quote',
+
+  // Lab Handover
   'pending_lab_receipt',
-  'repair_finished',
-
-  // Lab handover
   'received_at_lab',
-  'pending_repair_assignment',
 
-  // Repair assignment
+  // Repair Assignment
+  'assigned_to_repair_manager',
   'assigned_to_repair_person',
 
-  // Diagnosis
-  'diagnosis_in_progress',
-
-  // Quote
-  'pending_final_quote',
+  // Customer Approval
   'awaiting_customer_approval',
 
-  // Repair
-  'repair_authorized',
-  'repair_in_progress',
+  // Third-party Repair
+  'third_party_repair',
 
-  // Lab inspection
+  // Lab Repair Manager
   'pending_repair_manager_inspection',
-
-  // Onsite completion / CS confirmation
-  'pending_cs_confirmation',
 
   // Delivery
   'ready_for_delivery',

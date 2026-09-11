@@ -14,6 +14,9 @@ import {
   jobComments,
   jobItemStatusHistory,
   customerProfiles,
+  jobItemQuotes,
+  jobQuotes,
+  jobItemQuoteLines,
 } from '../../db/schema/index.js';
 
 import {
@@ -88,6 +91,7 @@ const getJobItem = async (
  * Shows jobs assigned to this Transport Person.
  */
 export const getAssignedJobs = async (req: Request, res: Response,) => {
+
   try {
     const transportPersonId = getUserId(req);
 
@@ -103,22 +107,11 @@ export const getAssignedJobs = async (req: Request, res: Response,) => {
       .where(
         and(
           eq(jobs.assignedTransportTeamPersonId, transportPersonId,),
-          eq(jobs.currentStatus, 'in_progress'),
-          //eq(jobItems.currentStatus, 'approved_for_transport'),
+          eq(jobs.currentStatus, 'pending_visit'),
         )
 
       )
-      .orderBy(desc(jobs.createdAt));
-    // const assignedJobs = await db
-    //   .select()
-    //   .from(jobs)
-    //   .where(
-    //     eq(
-    //       jobs.assignedTransportTeamPersonId,
-    //       transportPersonId,
-    //     ),
-    //   )
-    //   .orderBy(desc(jobs.createdAt));
+      .orderBy(desc(jobs.createdAt));;
 
     const jobsMap = new Map();
 
@@ -157,6 +150,157 @@ export const getAssignedJobs = async (req: Request, res: Response,) => {
     });
   }
 };
+
+
+
+
+export const getjobdetailswithestimatedquote = async (req: Request<{ id: string }>,res: Response,) => {
+  try {
+    const transportPersonId = getUserId(req);
+    const jobId  = req.params.id;
+
+    // --------------------------------------------------
+    // 1. Get job + customer
+    // --------------------------------------------------
+    const [jobResult] = await db
+      .select({
+        job: jobs,
+        customer: customerProfiles,
+      })
+      .from(jobs)
+      .leftJoin(
+        customerProfiles,
+        eq(jobs.customerId, customerProfiles.userId),
+      )
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(
+            jobs.assignedTransportTeamPersonId,
+            transportPersonId,
+          ),
+        ),
+      )
+      .limit(1);
+
+    if (!jobResult) {
+      return res.status(404).json({
+        error: 'Job not found or not assigned to you.',
+      });
+    }
+    const items = await db
+      .select()
+      .from(jobItems)
+      .where(eq(jobItems.jobId, jobId));
+
+    const [latestQuote] = await db
+      .select()
+      .from(jobQuotes)
+      .where(eq(jobQuotes.jobId, jobId))
+      .orderBy(desc(jobQuotes.version))
+      .limit(1);
+
+    let quoteWithItems = null;
+
+    if (latestQuote) {
+      const itemQuotes = await db
+        .select()
+        .from(jobItemQuotes)
+        .where(
+          eq(jobItemQuotes.jobQuoteId, latestQuote.id),
+        );
+
+      const quoteLines = await db
+        .select()
+        .from(jobItemQuoteLines)
+        .innerJoin(
+          jobItemQuotes,
+          eq(
+            jobItemQuoteLines.quoteId,
+            jobItemQuotes.id,
+          ),
+        )
+        .where(
+          eq(
+            jobItemQuotes.jobQuoteId,
+            latestQuote.id,
+          ),
+        )
+        .orderBy(
+          jobItemQuoteLines.sortOrder,
+          jobItemQuoteLines.createdAt,
+        );
+
+      quoteWithItems = {
+        ...latestQuote,
+
+        jobItemQuotes: itemQuotes.map((itemQuote) => {
+          const lines = quoteLines
+            .filter(
+              (row) =>
+                row.job_item_quote_lines.quoteId ===
+                itemQuote.id,
+            )
+            .map(
+              (row) => row.job_item_quote_lines,
+            );
+
+          const item = items.find(
+            (jobItem) =>
+              jobItem.id === itemQuote.jobItemId,
+          );
+
+          return {
+            ...itemQuote,
+            jobItem: item ?? null,
+            quoteLines: lines,
+          };
+        }),
+      };
+    }
+
+    return res.status(200).json({
+      job: jobResult.job,
+      customer: jobResult.customer,
+      jobItems: items,
+      quote: quoteWithItems,
+    });
+  } catch (error) {
+    console.error(
+      'Get transport job details error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/////////////////////////////////done////////////////////////////////
+
 
 /**
 transport person starts the transport visit for a job.

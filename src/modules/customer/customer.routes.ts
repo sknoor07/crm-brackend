@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import {
   createCustomerJob,
-  respondToQuote,
+  // respondToQuote,
 } from './customer.controller.js';
 
 
@@ -36,16 +36,16 @@ router.post(
   createCustomerJob,
 );
 
-router.patch(
-  '/quote-response',
-  requireAuth,
-  requireRole([
-    'admin',
-    'customer_service',
-    'customer',
-  ]),
-  validateRequest(quoteResponseSchema),
-  respondToQuote,
-);
+// router.patch(
+//   '/quote-response',
+//   requireAuth,
+//   requireRole([
+//     'admin',
+//     'customer_service',
+//     'customer',
+//   ]),
+//   validateRequest(quoteResponseSchema),
+//   respondToQuote,
+// );
 
 export default router;

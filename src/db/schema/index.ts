@@ -19,3 +19,4 @@ export * from './warranties.js';
 export * from './repeat-repairs.js';
 export * from './job-item-quotes.js';
 export * from './job-item-quote-lines.js';
+export * from './job_quotes.js';

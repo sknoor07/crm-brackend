@@ -779,35 +779,26 @@ export const closeJobRequest = async (
 };
 
 // the job submitted by customer the cs team will have a look and approve the job
-export const approveJobByCS = async (req: Request<{}, {}, CSApproveJobAndJobItemInput>, res: Response,) => {
+export const approveJobByCS = async (req: Request<{}, {}, CSApproveJobAndJobItemInput>,res: Response,) => {
   try {
-
-    // ------------------------------------------------
-    // Authentication
-    // ------------------------------------------------
-
-    const csUserId = req.user?.userId;
+    const csUserId =
+      req.user?.userId;
 
     if (!csUserId) {
-      return res.status(401).json({ status: 'error', message: 'Authenticated CS user is required', });
+      return res.status(401).json({
+        status: 'error',
+
+        message:
+          'Authenticated CS user is required',
+      });
     }
-
-
-    // ------------------------------------------------
-    // Process complete job review
-    // ------------------------------------------------
 
     const result =
       await processCSJobApproval(
         req.body,
         csUserId,
       );
-
-
-    // ------------------------------------------------
-    // Success response
-    // ------------------------------------------------
-
+      
     return res.status(200).json({
       status: 'success',
 
@@ -824,6 +815,9 @@ export const approveJobByCS = async (req: Request<{}, {}, CSApproveJobAndJobItem
 
       jobItems:
         result.jobItems,
+
+      jobQuote:
+        result.jobQuote,
     });
 
   } catch (error) {
@@ -1102,7 +1096,7 @@ export const getPendingFinalQuotesOnSite = async (req: Request, res: Response,) 
     const rawData = await db.select({ jobs: jobs, jobItems: jobItems })
       .from(jobs)
       .innerJoin(jobItems, eq(jobs.id, jobItems.jobId))
-      .where(eq(jobs.currentStatus, 'pending_final_quote_onsite'));
+      .where(eq(jobs.currentStatus, 'repair_started'));
 
     const groupedData = new Map<string, { job: typeof jobs.$inferSelect; items: typeof jobItems.$inferSelect[] }>();
 
@@ -1141,46 +1135,46 @@ export const getPendingFinalQuotesOnSite = async (req: Request, res: Response,) 
  * CS - GET ITEMS WAITING FOR ONSITE CONFIRMATION
  * ============================================================
  */
-export const getPendingOnsiteConfirmations = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const items = await db
-      .select({
-        job: jobs,
-        jobItem: jobItems,
-      })
-      .from(jobItems)
-      .innerJoin(
-        jobs,
-        eq(jobItems.jobId, jobs.id),
-      )
-      .where(
-        eq(
-          jobItems.currentStatus,
-          'pending_cs_confirmation',
-        ),
-      )
-      .orderBy(
-        asc(jobItems.updatedAt),
-      );
+// export const getPendingOnsiteConfirmations = async (
+//   req: Request,
+//   res: Response,
+// ) => {
+//   try {
+//     const items = await db
+//       .select({
+//         job: jobs,
+//         jobItem: jobItems,
+//       })
+//       .from(jobItems)
+//       .innerJoin(
+//         jobs,
+//         eq(jobItems.jobId, jobs.id),
+//       )
+//       .where(
+//         eq(
+//           jobItems.currentStatus,
+//           'pending_cs_confirmation',
+//         ),
+//       )
+//       .orderBy(
+//         asc(jobItems.updatedAt),
+//       );
 
-    return res.status(200).json({
-      count: items.length,
-      items,
-    });
-  } catch (error) {
-    console.error(
-      'Get pending onsite confirmations error:',
-      error,
-    );
+//     return res.status(200).json({
+//       count: items.length,
+//       items,
+//     });
+//   } catch (error) {
+//     console.error(
+//       'Get pending onsite confirmations error:',
+//       error,
+//     );
 
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
+//     return res.status(500).json({
+//       error: 'Internal server error',
+//     });
+//   }
+// };
 
 /**
  * ============================================================

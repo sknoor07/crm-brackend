@@ -6,19 +6,35 @@ export const allowedJobTransitions: Record<
   JobSummaryStatus,
   JobSummaryStatus[]
 > = {
-  created: ['in_progress'],
+  created: [
+    'in_progress',
+  ],
+
   in_progress: [
     'assigning_pickup_Engineer',
     'cancelled',
   ],
 
   assigning_pickup_Engineer: [
-    'repair_completed_onsite',
+    'pending_visit',
+  ],
+
+  pending_visit: [
+    'repair_started',
+  ],
+
+  repair_started: [
+    'pending_final_quote_onsite',
     'going_to_lab',
   ],
 
+  pending_final_quote_onsite: [
+    'repair_completed_onsite',
+    'cancelled',
+  ],
+
   repair_completed_onsite: [
-    'pending_final_quote_onsite',
+    'delivered',
   ],
 
   going_to_lab: [
@@ -35,11 +51,6 @@ export const allowedJobTransitions: Record<
 
   waitng_for_delivery: [
     'delivered',
-  ],
-
-  pending_final_quote_onsite: [
-    'delivered',
-    'cancelled',
   ],
 
   delivered: [
@@ -63,3 +74,4 @@ export const canTransitionJob = (
     ) ?? false
   );
 };
+

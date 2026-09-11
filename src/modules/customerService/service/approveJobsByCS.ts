@@ -25,6 +25,7 @@ import {
 } from '../cs.validation.js';
 import { updateJobItemWithStatusTransition } from '../../jobstatusandtransitions/item-status-history.js';
 import { transitionJob } from '../../jobstatusandtransitions/transition-job.js';
+import { jobQuotes } from '../../../db/schema/job_quotes.js';
 
 
 
@@ -181,12 +182,14 @@ export const approveJobItemByCS = async (
     jobItem: typeof jobItems.$inferSelect;
     input: CSApproveJobItemInput;
     changedBy: string;
+    jobQuoteId: string;
   },
 ) => {
   const {
     jobItem,
     input,
     changedBy,
+    jobQuoteId,
   } = params;
 
 
@@ -241,7 +244,7 @@ export const approveJobItemByCS = async (
 
       'approved_for_transport',
 
-      async (transaction:DbTransaction) => {
+      async (transaction: DbTransaction) => {
         const [updatedJobItem] =
           await transaction
             .update(jobItems)
@@ -286,43 +289,18 @@ export const approveJobItemByCS = async (
 
 
   // ------------------------------------------------
-  // Get latest quote version
-  // ------------------------------------------------
-
-  const [latestQuote] =
-    await tx
-      .select()
-      .from(jobItemQuotes)
-      .where(
-        eq(
-          jobItemQuotes.jobItemId,
-          jobItem.id,
-        ),
-      )
-      .orderBy(
-        desc(
-          jobItemQuotes.version,
-        ),
-      )
-      .limit(1);
-
-  const nextVersion =
-    (latestQuote?.version ?? 0) + 1;
-
-
-  // ------------------------------------------------
-  // Create estimated quote
+  // Create item quote
   // ------------------------------------------------
 
   const [quote] =
     await tx
       .insert(jobItemQuotes)
       .values({
+        jobQuoteId:
+          jobQuoteId,
+
         jobItemId:
           jobItem.id,
-
-        version:
-          nextVersion,
 
         componentsCost:
           moneyString(
@@ -371,7 +349,9 @@ export const approveJobItemByCS = async (
         quoteValues.lines.map(
           (line) => ({
             ...line,
-            quoteId: quote.id,
+
+            quoteId:
+              quote.id,
           }),
         ),
       );
@@ -385,6 +365,9 @@ export const approveJobItemByCS = async (
     quote,
 
     quoteValues,
+
+    serviceCharge:
+      serviceChargeAmount,
   };
 };
 
@@ -420,7 +403,7 @@ export const rejectJobItemByCS = async (
 
       'repair_rejected',
 
-      async (transaction:DbTransaction) => {
+      async (transaction: DbTransaction) => {
         const [updated] =
           await transaction
             .update(jobItems)
@@ -482,12 +465,14 @@ export const processJobItemForCS = async (
     jobItem: typeof jobItems.$inferSelect;
     input: CSApproveJobItemInput;
     changedBy: string;
+    jobQuoteId: string;
   },
 ) => {
   const {
     jobItem,
     input,
     changedBy,
+    jobQuoteId,
   } = params;
 
 
@@ -517,8 +502,12 @@ export const processJobItemForCS = async (
       tx,
       {
         jobItem,
+
         input,
+
         changedBy,
+
+        jobQuoteId,
       },
     );
   }
@@ -540,7 +529,6 @@ export const processJobItemForCS = async (
     },
   );
 };
-
 
 // --------------------------------------------------
 // Reject entire job
@@ -584,7 +572,7 @@ export const rejectJobByCS = async (
       tx,
 
     updateJob:
-      async (transaction:DbTransaction) => {
+      async (transaction: DbTransaction) => {
         const [updatedJob] =
           await transaction
             .update(jobs)
@@ -830,10 +818,84 @@ export const processCSJobApproval = async (
 
 
       // ----------------------------------------------
-      // 7. Process EVERY job item
+      // 7. Get next job quote version
+      // ----------------------------------------------
+
+      const [latestJobQuote] =
+        await tx
+          .select()
+          .from(jobQuotes)
+          .where(
+            eq(
+              jobQuotes.jobId,
+              job.id,
+            ),
+          )
+          .orderBy(
+            desc(
+              jobQuotes.version,
+            ),
+          )
+          .limit(1);
+
+      const nextJobQuoteVersion =
+        (latestJobQuote?.version ?? 0) + 1;
+
+
+      // ----------------------------------------------
+      // 8. Create ONE job-level quote
+      // ----------------------------------------------
+
+      const [jobQuote] =
+        await tx
+          .insert(jobQuotes)
+          .values({
+            jobId:
+              job.id,
+
+            version:
+              nextJobQuoteVersion,
+
+            subtotal:
+              '0.00',
+
+            serviceCharge:
+              '0.00',
+
+            discount:
+              '0.00',
+
+            tax:
+              '0.00',
+
+            totalAmount:
+              '0.00',
+
+            createdByUserId:
+              csUserId,
+
+            status:
+              'estimated',
+          })
+          .returning();
+
+      if (!jobQuote) {
+        throw new Error(
+          `Failed to create job quote for job ${job.id}`,
+        );
+      }
+
+
+      // ----------------------------------------------
+      // 9. Process EVERY job item
       // ----------------------------------------------
 
       const processedItems = [];
+
+      let subtotal = 0;
+
+      let serviceCharge = 0;
+
 
       for (
         const jobItem
@@ -851,6 +913,7 @@ export const processCSJobApproval = async (
           );
         }
 
+
         const result =
           await processJobItemForCS(
             tx,
@@ -862,17 +925,102 @@ export const processCSJobApproval = async (
 
               changedBy:
                 csUserId,
+
+              jobQuoteId:
+                jobQuote.id,
             },
           );
 
+
         processedItems.push(
           result,
+        );
+
+
+        // --------------------------------------------
+        // Add approved item to job quote totals
+        // --------------------------------------------
+
+        if (result.quoteValues) {
+          subtotal +=
+            result.quoteValues.componentsCost;
+
+          serviceCharge +=
+            result.serviceCharge;
+        }
+      }
+
+
+      // ----------------------------------------------
+      // 10. Calculate job quote totals
+      // ----------------------------------------------
+
+      const discount = 0;
+
+      const tax = 0;
+
+      const totalAmount =
+        subtotal +
+        serviceCharge -
+        discount +
+        tax;
+
+
+      // ----------------------------------------------
+      // 11. Finalize job quote
+      // ----------------------------------------------
+
+      const [updatedJobQuote] =
+        await tx
+          .update(jobQuotes)
+          .set({
+            subtotal:
+              moneyString(
+                subtotal,
+              ),
+
+            serviceCharge:
+              moneyString(
+                serviceCharge,
+              ),
+
+            discount:
+              moneyString(
+                discount,
+              ),
+
+            tax:
+              moneyString(
+                tax,
+              ),
+
+            totalAmount:
+              moneyString(
+                totalAmount,
+              ),
+
+            status:
+              hasApprovedItem
+                ? 'final'
+                : 'rejected',
+          })
+          .where(
+            eq(
+              jobQuotes.id,
+              jobQuote.id,
+            ),
+          )
+          .returning();
+
+      if (!updatedJobQuote) {
+        throw new Error(
+          `Failed to finalize job quote ${jobQuote.id}`,
         );
       }
 
 
       // ----------------------------------------------
-      // 8. All items rejected
+      // 12. All items rejected
       // ----------------------------------------------
 
       if (!hasApprovedItem) {
@@ -898,6 +1046,9 @@ export const processCSJobApproval = async (
           jobItems:
             processedItems,
 
+          jobQuote:
+            updatedJobQuote,
+
           decision:
             'rejected' as const,
         };
@@ -905,7 +1056,7 @@ export const processCSJobApproval = async (
 
 
       // ----------------------------------------------
-      // 9. At least one item approved
+      // 13. At least one item approved
       // ----------------------------------------------
 
       const updatedJob =
@@ -924,7 +1075,7 @@ export const processCSJobApproval = async (
 
 
       // ----------------------------------------------
-      // 10. Return result
+      // 14. Return result
       // ----------------------------------------------
 
       return {
@@ -933,6 +1084,9 @@ export const processCSJobApproval = async (
 
         jobItems:
           processedItems,
+
+        jobQuote:
+          updatedJobQuote,
 
         decision:
           'approved' as const,

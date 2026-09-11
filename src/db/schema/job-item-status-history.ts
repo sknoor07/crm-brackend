@@ -14,7 +14,7 @@ export const jobItemStatusHistory =pgTable('job_item_status_history',{
 
       jobItemId: uuid('job_item_id').references(() => jobItems.id).notNull(),
 
-      previousStatus: jobItemStatus('previous_status',).notNull(),
+      previousStatus: jobItemStatus('previous_status',),
 
       newStatus: jobItemStatus('new_status',).notNull(),
 

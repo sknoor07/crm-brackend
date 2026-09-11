@@ -14,6 +14,7 @@ import {
   startTransportJobVisit,
   finishOnsiteRepair,
   sendJobforInspectionAtLab,
+  getjobdetailswithestimatedquote,
 } from './transportPerson.controller.js';
 
 import {
@@ -67,12 +68,31 @@ router.get(
   getAssignedJobs,
 );
 
+
+router.get(
+  '/getjobdetailswithestimated-quote/:id',
+  requireRole(transportRoles,),
+  getjobdetailswithestimatedquote,
+)
+
+
 router.patch(
   '/start',
   requireRole(transportRoles),
   validateRequest(startTransportJobSchema),
   startTransportJobVisit,
 );
+
+
+
+////////////////////////////done////////////////////////
+
+
+
+
+
+
+
 
 router.patch(
   '/:jobId/send-job-to-lab',
