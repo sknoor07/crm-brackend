@@ -212,185 +212,212 @@ export type FinalQuoteNewItemInput = z.infer<
   typeof finalQuoteNewItemSchema
 >;
 
-// --------------------------------------------------
-// Complete CS final quote request
-// --------------------------------------------------
 
-export const generateFinalQuoteSchema = z
-  .object({
-    jobId: z
-      .string()
-      .uuid('Invalid job ID format'),
+export const generateFinalQuoteSchema = z.object({
+  jobId: z.string().uuid('Invalid job ID format'),
 
-    /**
-     * Existing items that remain part of
-     * the final quote.
-     *
-     * Their component arrays represent the
-     * FINAL component lists.
-     */
-    items: z
-      .array(finalQuoteItemSchema)
-      .default([]),
-
-    /**
-     * Completely new items added by CS.
-     */
-    addedItems: z
-      .array(finalQuoteNewItemSchema)
-      .default([]),
-
-    /**
-     * Existing items that CS wants removed.
-     *
-     * These are not physically deleted.
-     * The controller will handle the appropriate
-     * status transition and audit trail.
-     */
-    removedItemIds: z
-      .array(
-        z.string().uuid(
-          'Invalid job item ID format',
-        ),
-      )
-      .default([]),
-
-    /**
-     * Job-level comment.
-     */
-    comment: z
-      .string()
-      .trim()
-      .min(
-        1,
-        'Job comment is required',
-      )
-      .max(
-        2000,
-        'Job comment cannot exceed 2000 characters',
+  items: z.array(
+    z.object({
+      jobItemId: z.string().uuid(
+        'Invalid job item ID format',
       ),
 
-    /**
-     * Discount controlled by CS.
-     */
-    discount: z
-      .number()
-      .nonnegative(
-        'Discount cannot be negative',
-      )
-      .default(0),
+      deviceCategory: z
+        .string()
+        .trim()
+        .min(1, 'Device category is required')
+        .max(
+          100,
+          'Device category cannot exceed 100 characters',
+        )
+        .optional(),
 
-    /**
-     * Tax controlled by CS.
-     */
-    tax: z
-      .number()
-      .nonnegative(
-        'Tax cannot be negative',
-      )
-      .default(0),
-  })
+      deviceSerialNumber: z
+        .string()
+        .trim()
+        .max(
+          50,
+          'Device serial number cannot exceed 50 characters',
+        )
+        .optional()
+        .nullable(),
 
-  // ------------------------------------------------
-  // Final quote business rules
-  // ------------------------------------------------
+      issueDescription: z
+        .string()
+        .trim()
+        .min(
+          1,
+          'Issue description is required',
+        )
+        .optional(),
 
-  .superRefine((input, ctx) => {
-    // ----------------------------------------------
-    // Existing item IDs must be unique
-    // ----------------------------------------------
+      issueCategory: z
+        .string()
+        .trim()
+        .max(
+          50,
+          'Issue category cannot exceed 50 characters',
+        )
+        .optional()
+        .nullable(),
 
-    const itemIds = input.items.map(
-      (item) => item.jobItemId,
-    );
+      repairLocation: z
+        .enum([
+          'customer_site',
+          'inlab',
+        ])
+        .optional(),
 
-    const uniqueItemIds =
-      new Set(itemIds);
+      /*
+       * Existing item:
+       *
+       * undefined -> preserve previous components
+       * []        -> remove all components
+       * [...]     -> replace with new components
+       */
+      components: z
+        .array(
+          z.object({
+            name: z
+              .string()
+              .trim()
+              .min(
+                1,
+                'Component name is required',
+              ),
 
-    if (
-      uniqueItemIds.size !==
-      itemIds.length
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['items'],
-        message:
-          'Duplicate job item IDs are not allowed',
-      });
-    }
+            quantity: z
+              .number()
+              .positive(
+                'Component quantity must be greater than 0',
+              ),
 
-    // ----------------------------------------------
-    // Removed item IDs must be unique
-    // ----------------------------------------------
+            unitPrice: z
+              .number()
+              .nonnegative(
+                'Component unit price cannot be negative',
+              ),
+          }),
+        )
+        .optional(),
 
-    const uniqueRemovedIds =
-      new Set(
-        input.removedItemIds,
-      );
+      comment: z
+        .string()
+        .trim()
+        .max(
+          2000,
+          'Item comment cannot exceed 2000 characters',
+        )
+        .optional(),
+    }),
+  ),
 
-    if (
-      uniqueRemovedIds.size !==
-      input.removedItemIds.length
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['removedItemIds'],
-        message:
-          'Duplicate removed job item IDs are not allowed',
-      });
-    }
-
-    // ----------------------------------------------
-    // An item cannot be kept and removed
-    // ----------------------------------------------
-
-    const removedIds =
-      new Set(
-        input.removedItemIds,
-      );
-
-    input.items.forEach(
-      (item, index) => {
-        if (
-          removedIds.has(
-            item.jobItemId,
+  addedItems: z
+    .array(
+      z.object({
+        deviceCategory: z
+          .string()
+          .trim()
+          .min(
+            1,
+            'Device category is required',
           )
-        ) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: [
-              'items',
-              index,
-              'jobItemId',
-            ],
-            message:
-              'A job item cannot be included and removed at the same time',
-          });
-        }
-      },
-    );
+          .max(100),
 
-    // ----------------------------------------------
-    // Final quote must contain at least one item
-    // ----------------------------------------------
+        deviceSerialNumber: z
+          .string()
+          .trim()
+          .max(50)
+          .optional()
+          .nullable(),
 
-    if (
-      input.items.length === 0 &&
-      input.addedItems.length === 0
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['items'],
-        message:
-          'Final quote must contain at least one item',
-      });
-    }
-  });
+        issueDescription: z
+          .string()
+          .trim()
+          .min(
+            1,
+            'Issue description is required',
+          ),
 
-export type GenerateFinalQuoteInput = z.infer<
-  typeof generateFinalQuoteSchema
->;
+        issueCategory: z
+          .string()
+          .trim()
+          .max(50)
+          .optional()
+          .nullable(),
 
+        repairLocation: z.enum([
+          'customer_site',
+          'inlab',
+        ]),
+
+        components: z
+          .array(
+            z.object({
+              name: z
+                .string()
+                .trim()
+                .min(1),
+
+              quantity: z
+                .number()
+                .positive(),
+
+              unitPrice: z
+                .number()
+                .nonnegative(),
+            }),
+          )
+          .default([]),
+
+        comment: z
+          .string()
+          .trim()
+          .max(2000)
+          .optional(),
+      }),
+    )
+    .default([]),
+
+  removedItemIds: z
+    .array(
+      z.string().uuid(
+        'Invalid job item ID format',
+      ),
+    )
+    .default([]),
+
+  comment: z
+    .string()
+    .trim()
+    .min(
+      1,
+      'Comment is required',
+    )
+    .max(
+      2000,
+      'Comment cannot exceed 2000 characters',
+    ),
+
+  discount: z
+    .number()
+    .nonnegative(
+      'Discount cannot be negative',
+    )
+    .default(0),
+
+  tax: z
+    .number()
+    .nonnegative(
+      'Tax cannot be negative',
+    )
+    .default(0),
+});
+
+export type GenerateFinalQuoteInput =
+  z.infer<
+    typeof generateFinalQuoteSchema
+  >;
 // --------------------------------------------------
 // Get customer details
 // --------------------------------------------------

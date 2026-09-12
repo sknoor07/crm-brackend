@@ -20,38 +20,38 @@ export const allowedJobTransitions: Record<
   ],
 
   pending_visit: [
-    'repair_started',
+    'pending_final_quote', //onsite
     'going_to_lab',
   ],
 
-  repair_started: [
-    'pending_final_quote_onsite',
-    'going_to_lab',
-  ],
-
-  pending_final_quote_onsite: [
-    'repair_completed_onsite',
+  pending_final_quote: [
+    'repair_in_progress',  //inlab
     'cancelled',
+    'repair_started'
   ],
 
-  repair_completed_onsite: [
-    'delivered',
+  repair_started:[
+    'repair_completed',
+  ],
+
+  repair_completed: [
+    'closed',
+    'waitng_for_delivery', //lab
+    'delivered',        //onsite
   ],
 
   going_to_lab: [
-    'repair_in_progress_inlab',
+    'repair_in_progress', //lab
   ],
 
-  repair_in_progress_inlab: [
-    'repair_completed_inlab',
+  repair_in_progress: [
+    'pending_final_quote',  //lab
+    'repair_completed',   //lab
   ],
 
-  repair_completed_inlab: [
-    'waitng_for_delivery',
-  ],
 
   waitng_for_delivery: [
-    'delivered',
+    'delivered', //lab
   ],
 
   delivered: [

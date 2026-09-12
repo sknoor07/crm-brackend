@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import {
   createCustomerJob,
+  getCustomerPendingQuotes,
   respondToQuote,
   // respondToQuote,
 } from './customer.controller.js';
@@ -49,4 +50,11 @@ router.patch(
   respondToQuote,
 );
 
+
+router.get(
+  '/quotes/pending',
+  requireAuth,
+  requireRole(['customer']),
+  getCustomerPendingQuotes,
+);
 export default router;

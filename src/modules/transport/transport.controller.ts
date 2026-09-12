@@ -396,68 +396,284 @@ export const getPickUpPersonList = async (req: Request, res: Response) => {
  *
  * This is an ITEM-level transition.
  */
-export const receiveAtLab = async (req: Request<{}, {}, ReceiveLabInput>, res: Response,) => {
-  try {
-    const { jobItemId, comment, } = req.body;
 
-    const transportManagerId = req.user?.userId;
+export const receiveAtLab = async (
+  req: Request<{}, {}, ReceiveLabInput>,
+  res: Response,
+) => {
+  try {
+    const {
+      jobItemId,
+      jobItemIds,
+      comment,
+    } = req.body;
+
+    const transportManagerId =
+      req.user?.userId;
 
     if (!transportManagerId) {
-      return res.status(401).json({ error: 'Authenticated user not found', });
+      return res.status(401).json({
+        error: 'Authenticated user not found',
+      });
     }
 
     /* -----------------------------------------------------
-       Find item
+       Validate input
        ----------------------------------------------------- */
 
-    const [item] = await db
-      .select()
-      .from(jobItems)
-      .where(eq(jobItems.id, jobItemId,),)
-      .limit(1);
+    const hasSingleItem = !!jobItemId;
 
-    if (!item) {
-      return res.status(404).json({ error: 'Job item not found', });
+    const hasBatchItems =
+      Array.isArray(jobItemIds) &&
+      jobItemIds.length > 0;
+
+    if (hasSingleItem && hasBatchItems) {
+      return res.status(400).json({
+        error:
+          'Provide either jobItemId or jobItemIds, not both.',
+      });
+    }
+
+    if (!hasSingleItem && !hasBatchItems) {
+      return res.status(400).json({
+        error:
+          'Either jobItemId or jobItemIds is required.',
+      });
     }
 
     /* -----------------------------------------------------
-       Validate status
+       Normalize IDs
        ----------------------------------------------------- */
 
-    if (item.currentStatus !== 'pending_lab_receipt') {
-      return res.status(400).json({ error: `Item cannot be received at lab from '${item.currentStatus}' status.`, });
+    const itemIds = hasSingleItem
+      ? [jobItemId!]
+      : jobItemIds!;
+
+    const uniqueItemIds =
+      new Set(itemIds);
+
+    if (
+      uniqueItemIds.size !==
+      itemIds.length
+    ) {
+      return res.status(400).json({
+        error:
+          'Duplicate job item IDs are not allowed.',
+      });
     }
 
     /* -----------------------------------------------------
-       Update item
+       Find items
        ----------------------------------------------------- */
 
-    const updatedItem = await updateJobItemWithStatusTransition(
-      item.id,
-      item.currentStatus as JobItemStatus,
-      'received_at_lab',
-      async (tx) => {
-        const [result] = await tx
-          .update(jobItems)
-          .set({
-            currentStatus: 'received_at_lab',
-            updatedAt: new Date(),
-          })
-          .where(eq(jobItems.id, jobItemId))
-          .returning();
-        return result;
-      },
-      transportManagerId,
-      comment || 'Item received at the lab'
+   const existingItems: (typeof jobItems.$inferSelect)[] = [];
+
+    for (const id of itemIds) {
+      const [item] = await db
+        .select()
+        .from(jobItems)
+        .where(eq(jobItems.id, id))
+        .limit(1);
+
+      if (!item) {
+        return res.status(404).json({
+          error:
+            `Job item ${id} not found.`,
+        });
+      }
+
+      existingItems.push(item);
+    }
+
+    /* -----------------------------------------------------
+       Ensure all items belong to same job
+       ----------------------------------------------------- */
+
+    const jobIds = new Set(
+      existingItems.map(
+        (item) => item.jobId,
+      ),
     );
 
-    return res.status(200).json({ message: 'Item successfully received at the lab.', item: updatedItem, });
-  } catch (error) {
-    console.error('Receive item at lab error:', error,);
+    if (jobIds.size !== 1) {
+      return res.status(400).json({
+        error:
+          'All job items must belong to the same job.',
+      });
+    }
 
-    return res.status(500).json({ error: 'Internal server error while receiving item at lab', });
+    const jobId =
+      existingItems[0].jobId;
+
+    /* -----------------------------------------------------
+       Find job
+       ----------------------------------------------------- */
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate transport manager
+       ----------------------------------------------------- */
+
+    if (
+      job.transportManagerId !==
+      transportManagerId
+    ) {
+      return res.status(403).json({
+        error:
+          'You are not assigned as the transport manager for this job.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate job status
+       ----------------------------------------------------- */
+
+    if (job.currentStatus !== 'going_to_lab') {
+      return res.status(400).json({
+        error:
+          `Items cannot be received at lab when job status is ` +
+          `'${job.currentStatus}'.`,
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate item statuses
+       ----------------------------------------------------- */
+
+    const invalidItems =
+      existingItems.filter(
+        (item) =>
+          item.currentStatus !==
+          'pending_lab_receipt',
+      );
+
+    if (invalidItems.length > 0) {
+      return res.status(400).json({
+        error:
+          'All selected items must be in pending_lab_receipt status.',
+        items: invalidItems.map(
+          (item) => ({
+            jobItemId: item.id,
+            currentStatus:
+              item.currentStatus,
+          }),
+        ),
+      });
+    }
+
+    /* -----------------------------------------------------
+       Process items in transaction
+       ----------------------------------------------------- */
+
+    const result =
+      await db.transaction(async (tx) => {
+        const updatedItems = [];
+
+        for (const item of existingItems) {
+          const updatedItem =
+            await updateJobItemWithStatusTransition(
+              item.id,
+              item.currentStatus as JobItemStatus,
+              'received_at_lab',
+              async (transaction) => {
+                const [updated] =
+                  await transaction
+                    .update(jobItems)
+                    .set({
+                      currentStatus:
+                        'received_at_lab',
+
+                      onsiteRepairAuthorized:
+                        false,
+
+                      inlabRepairAuthorized:
+                        true,
+
+                      updatedAt:
+                        new Date(),
+                    })
+                    .where(
+                      eq(
+                        jobItems.id,
+                        item.id,
+                      ),
+                    )
+                    .returning();
+
+                return updated;
+              },
+              transportManagerId,
+              comment?.trim() ||
+                'Item received at the lab.',
+              tx,
+            );
+
+          updatedItems.push(
+            updatedItem,
+          );
+        }
+
+        await tx
+          .insert(jobComments)
+          .values({
+            jobId,
+            jobItemId: null,
+            userId:
+              transportManagerId,
+            comment:
+              comment?.trim() ||
+              (
+                updatedItems.length === 1
+                  ? 'Item received at the lab.'
+                  : 'Items received at the lab.'
+              ),
+          });
+
+        return {
+          job,
+          items: updatedItems,
+        };
+      });
+
+    /* -----------------------------------------------------
+       Response
+       ----------------------------------------------------- */
+
+    return res.status(200).json({
+      message:
+        result.items.length === 1
+          ? 'Item successfully received at the lab.'
+          : 'Items successfully received at the lab.',
+
+      count: result.items.length,
+
+      data: result,
+    });
+  } catch (error) {
+    console.error(
+      'Receive item at lab error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error:
+        'Internal server error while receiving item at lab',
+    });
   }
 };
+
+
 
 
 /* =========================================================
@@ -845,14 +1061,7 @@ export const getRepairManagers = async (
 };
 
 
-export const assignRepairManager = async (
-  req: Request<
-    {},
-    {},
-    AssignRepairManagerInput
-  >,
-  res: Response,
-) => {
+export const assignRepairManager = async (req: Request<{},{},AssignRepairManagerInput>,res: Response,) => {
   try {
     const {
       jobId,
@@ -869,7 +1078,10 @@ export const assignRepairManager = async (
       });
     }
 
-    // Find job
+    /* -----------------------------------------------------
+       Find job
+       ----------------------------------------------------- */
+
     const [job] = await db
       .select()
       .from(jobs)
@@ -882,15 +1094,36 @@ export const assignRepairManager = async (
       });
     }
 
-    // Job must still be active
-    if (job.currentStatus !== 'in_progress') {
-      return res.status(400).json({
+    /* -----------------------------------------------------
+       Validate transport manager authorization
+       ----------------------------------------------------- */
+
+    if (job.transportManagerId !== transportManagerId) {
+      return res.status(403).json({
         error:
-          `Cannot assign Repair Team Manager when job is '${job.currentStatus}'.`,
+          'You are not assigned as the transport manager for this job',
       });
     }
 
-    // Validate Repair Team Manager
+    /* -----------------------------------------------------
+       Validate job status
+       ----------------------------------------------------- */
+
+    if (
+      job.currentStatus !== 'going_to_lab' &&
+      job.currentStatus !== 'repair_in_progress'
+    ) {
+      return res.status(400).json({
+        error:
+          `Cannot assign Repair Team Manager when job is ` +
+          `'${job.currentStatus}'.`,
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate Repair Team Manager
+       ----------------------------------------------------- */
+
     const repairManagerActive =
       await isActiveRepairManager(
         repairManagerId,
@@ -903,26 +1136,135 @@ export const assignRepairManager = async (
       });
     }
 
-    // Assign manager + record comment atomically
+    /* -----------------------------------------------------
+       Find lab items ready for Repair Manager assignment
+       ----------------------------------------------------- */
+
+    const labItems = await db
+      .select()
+      .from(jobItems)
+      .where(
+        and(
+          eq(jobItems.jobId, jobId),
+          eq(
+            jobItems.currentStatus,
+            'received_at_lab',
+          ),
+        ),
+      );
+
+    if (labItems.length === 0) {
+      return res.status(400).json({
+        error:
+          'No job items are currently received at the lab and ready for Repair Team Manager assignment.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Assign manager + transition items + update job
+       atomically
+       ----------------------------------------------------- */
+
     const updatedJob =
       await db.transaction(async (tx) => {
         const [updated] = await tx
           .update(jobs)
           .set({
             repairManagerId,
-            transportManagerId,
             updatedAt: new Date(),
           })
           .where(eq(jobs.id, jobId))
           .returning();
 
-        await tx
-          .insert(jobComments)
-          .values({
+        if (!updated) {
+          throw new Error(
+            'Job could not be updated',
+          );
+        }
+
+        /* -----------------------------------------------
+           Move received lab items to
+           assigned_to_repair_manager
+           ----------------------------------------------- */
+
+        for (const item of labItems) {
+          await updateJobItemWithStatusTransition(
+            item.id,
+            item.currentStatus as JobItemStatus,
+            'assigned_to_repair_manager',
+            async (transaction) => {
+              const [updatedItem] =
+                await transaction
+                  .update(jobItems)
+                  .set({
+                    currentStatus:
+                      'assigned_to_repair_manager',
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    eq(jobItems.id, item.id),
+                  )
+                  .returning();
+
+              return updatedItem;
+            },
+            transportManagerId,
+            comment ||
+              'Item assigned to Repair Team Manager',
+            tx,
+          );
+        }
+
+        /* -----------------------------------------------
+           Move job into repair phase
+           ----------------------------------------------- */
+
+        if (job.currentStatus === 'going_to_lab') {
+          await transitionJob({
             jobId,
-            userId: transportManagerId,
-            comment,
+            previousStatus:
+              job.currentStatus,
+            newStatus:
+              'repair_in_progress',
+            changedBy:
+              transportManagerId,
+            note:
+              comment ||
+              'Repair Team Manager assigned and lab repair process started',
+            updateJob: async (transaction) => {
+              const [result] =
+                await transaction
+                  .update(jobs)
+                  .set({
+                    currentStatus:
+                      'repair_in_progress',
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    eq(jobs.id, jobId),
+                  )
+                  .returning();
+
+              return result;
+            },
+            existingTx: tx,
           });
+        } else if (comment) {
+          /* ---------------------------------------------
+             Job is already in repair_in_progress.
+             Record an assignment comment only when
+             the user supplied one.
+             --------------------------------------------- */
+
+          await tx
+            .insert(jobComments)
+            .values({
+              jobId,
+              userId:
+                transportManagerId,
+              comment,
+            });
+        }
 
         return updated;
       });
@@ -931,6 +1273,7 @@ export const assignRepairManager = async (
       message:
         'Repair Team Manager assigned successfully.',
       job: updatedJob,
+      assignedItemCount: labItems.length,
     });
   } catch (error) {
     console.error(

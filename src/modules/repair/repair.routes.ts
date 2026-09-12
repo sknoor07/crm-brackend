@@ -74,7 +74,7 @@ router.get(
 router.patch(
   '/assign',
   requireRole(repairManagerRoles),
-  validateRequest(
+  validateRequest(                                //check
     assignRepairPersonSchema,
   ),
   assignRepairPerson,
@@ -173,7 +173,7 @@ router.patch(
 router.patch(
   '/request-final-quote',
   requireRole(repairPersonRoles),
-  validateRequest(
+  validateRequest(                              // check
     requestFinalQuoteSchema,
   ),
   requestFinalQuote,

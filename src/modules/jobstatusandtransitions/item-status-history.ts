@@ -46,7 +46,8 @@ export const allowedJobItemTransitions: Record<
     'delivered',
     'repair_rejected',
     'pending_final_quote',
-    'pending_lab_receipt',
+    'pending_lab_receipt'
+  
   ],
 
   // Lab handover
@@ -75,6 +76,7 @@ export const allowedJobItemTransitions: Record<
   assigned_to_repair_person: [
     'pending_final_quote',
     'assigned_to_repair_manager',
+    'pending_lab_receipt',
   ],
 
   // Quote

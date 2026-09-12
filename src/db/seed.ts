@@ -33,7 +33,7 @@ const roleSeeds = [
     description: 'Manage pickup and delivery operations',
   },
   {
-    name: 'pickup_person',
+    name: 'transport_team_person',
     description: 'Handle device pickup and delivery',
   },
   {
@@ -102,7 +102,7 @@ const userSeeds = [
     email: 'pickup-person@test.example.com',
     firstName: 'Test',
     lastName: 'Pickup Person',
-    role: 'pickup_person',
+    role: 'transport_team_person',
     userType: 'employee',
   },
   {

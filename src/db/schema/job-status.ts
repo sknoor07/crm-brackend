@@ -20,29 +20,30 @@ export type RepairLocation =
 export const jobSummaryStatusValues = [
   'created',
   'in_progress',
-  'repair_started',
 
   'assigning_pickup_Engineer',
-
   'pending_visit',
-  'repair_completed_onsite',
 
+  // Onsite / common repair stage
+  'repair_started',
+
+  // Lab transfer
   'going_to_lab',
 
-  'repair_in_progress_inlab',
+  // Quote / repair
+  'pending_final_quote',
+  'repair_in_progress',
+  'repair_completed',
 
-  'repair_completed_inlab',
-
+  // Lab delivery
   'waitng_for_delivery',
 
-  'pending_final_quote_onsite',
-
+  // Final delivery
   'delivered',
 
+  // Terminal
   'closed',
-
   'done',
-
   'cancelled',
 ] as const;
 
@@ -53,7 +54,6 @@ export const jobSummaryStatus = pgEnum(
 
 export type JobSummaryStatus =
   (typeof jobSummaryStatusValues)[number];
-
 
 /**
  * Workflow of an individual repairable item.

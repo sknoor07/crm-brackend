@@ -45,11 +45,6 @@ export const jobItemQuotes = pgTable('job_item_quotes', {
     .references(() => users.id)
     .notNull(),
 
-  status: varchar('status', {
-    length: 20,
-  })
-    .notNull()
-    .default('estimated'),
 
   createdAt: timestamp('created_at')
     .defaultNow()

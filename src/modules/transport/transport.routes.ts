@@ -47,24 +47,6 @@ router.get(
   getPickUpPersonList,
 );
 
-
-
-
-
-
-
-
-
-
-
-///////////////////////done/////////////////////////////////////
-
-
-
-
-
-
-
 /**
  * Transport Manager assigns the whole job
  * to a Transport/Repair Person.
@@ -78,6 +60,18 @@ router.patch(
 );
 
 
+
+
+
+
+
+
+
+
+
+///////////////////////done/////////////////////////////////////
+
+
 /**
  * Transport Manager receives an individual
  * item at the lab.
@@ -87,6 +81,27 @@ router.patch(
   validateRequest(receiveLabSchema),
   receiveAtLab,
 );
+
+
+
+///////////////////////inspeacton needed///////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /**

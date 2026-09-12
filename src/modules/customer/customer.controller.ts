@@ -1,15 +1,15 @@
 import { Request, Response } from 'express';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import {jobs,jobItems,jobComments,deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes,} from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes, jobItemQuoteLines, } from '../../db/schema/index.js';
 
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 
-import {updateJobItemWithStatusTransition,} from '../jobstatusandtransitions/item-status-history.js';
+import { updateJobItemWithStatusTransition, } from '../jobstatusandtransitions/item-status-history.js';
 
-import {CreateCustomerJobInput,CreateCustomerJobItemSchema, QuoteResponseInput} from './customer.validation.js';
+import { CreateCustomerJobInput, CreateCustomerJobItemSchema, QuoteResponseInput } from './customer.validation.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
 
 
@@ -238,6 +238,7 @@ export const respondToQuote = async (
       .select({
         id: jobs.id,
         customerId: jobs.customerId,
+        currentStatus: jobs.currentStatus,
       })
       .from(jobs)
       .where(eq(jobs.id, jobId))
@@ -286,8 +287,7 @@ export const respondToQuote = async (
 
     if (latestQuote.status !== 'pending') {
       return res.status(400).json({
-        error:
-          `Cannot respond to quote. Quote is currently '${latestQuote.status}'.`,
+        error: `Cannot respond to quote. Quote is currently '${latestQuote.status}'.`,
       });
     }
 
@@ -327,36 +327,28 @@ export const respondToQuote = async (
     // ---------------------------------------------------------
     // Customer decision
     // ---------------------------------------------------------
-
     const accepted = decision === 'accept';
 
     const updatedItems: (typeof jobItems.$inferSelect)[] = [];
 
     await db.transaction(async (tx) => {
       // -------------------------------------------------------
-      // Update job quote status
+      // Update quote status
       // -------------------------------------------------------
 
       await tx
         .update(jobQuotes)
         .set({
-          status: accepted
-            ? 'final'
-            : 'rejected',
+          status: accepted ? 'final' : 'rejected',
         })
-        .where(
-          eq(
-            jobQuotes.id,
-            latestQuote.id,
-          ),
-        );
+        .where(eq(jobQuotes.id, latestQuote.id));
 
-      // -------------------------------------------------------
-      // Approve / reject every item in this quote
-      // -------------------------------------------------------
+      // =======================================================
+      // CUSTOMER REJECTED QUOTE
+      // =======================================================
 
-      for (const item of quotedItems) {
-        if (!accepted) {
+      if (!accepted) {
+        for (const item of quotedItems) {
           const updatedItem =
             await updateJobItemWithStatusTransition(
               item.jobItemId,
@@ -367,18 +359,20 @@ export const respondToQuote = async (
                   await transaction
                     .update(jobItems)
                     .set({
-                      // IMPORTANT:
-                      // The helper only validates/logs the
-                      // transition. We must update the actual
-                      // current status here.
                       currentStatus:
                         'pending_final_quote',
 
-                      isFinalQuoteApproved: false,
+                      isFinalQuoteApproved:
+                        false,
 
-                      onsiteRepairAuthorized: false,
+                      onsiteRepairAuthorized:
+                        false,
 
-                      updatedAt: new Date(),
+                      inlabRepairAuthorized:
+                        false,
+
+                      updatedAt:
+                        new Date(),
                     })
                     .where(
                       eq(
@@ -392,28 +386,61 @@ export const respondToQuote = async (
               },
               userId,
               comment?.trim() ||
-                'Customer rejected the final quote. Quote returned for negotiation.',
+              'Customer rejected the final quote. Quote returned for negotiation.',
               tx,
             );
 
           updatedItems.push(updatedItem);
-
-          continue;
         }
 
-        // -----------------------------------------------------
-        // Customer accepted the entire job quote
-        // -----------------------------------------------------
+        await tx.insert(jobComments).values({
+          jobId,
+          jobItemId: null,
+          userId,
+          comment:
+            comment?.trim() ||
+            'Customer rejected the final job quote. Quote returned for negotiation.',
+        });
 
-        const newStatus =
-          item.repairLocation === 'customer_site'
-            ? 'assigned_to_repair_person'
-            : 'transport_visit_in_progress';
+        return;
+      }
 
-        const itemComment =
-          item.repairLocation === 'customer_site'
-            ? 'Customer approved the final quote. Onsite repair is authorized.'
-            : 'Customer approved the final quote. Item can proceed to lab transport.';
+      // =======================================================
+      // CUSTOMER ACCEPTED QUOTE
+      // =======================================================
+
+
+      let hasLabItem = false;
+      let hasOnsiteItem = false;
+
+      for (const item of quotedItems) {
+        const isCustomerSite =
+          item.repairLocation === 'customer_site';
+
+        const isLab =
+          item.repairLocation === 'inlab';
+
+        if (!isCustomerSite && !isLab) {
+          throw new Error(
+            `Unsupported repair location '${item.repairLocation}' for job item ${item.jobItemId}`,
+          );
+        }
+
+        if (isCustomerSite) {
+          hasOnsiteItem = true;
+        }
+
+        if (isLab) {
+          hasLabItem = true;
+        }
+
+        const newStatus = isCustomerSite
+          ? 'transport_visit_in_progress'
+          : 'assigned_to_repair_person';
+
+        const itemComment = isCustomerSite
+          ? 'Customer approved the final quote. Onsite repair can proceed.'
+          : 'Customer approved the final quote. Lab repair can proceed.';
 
         const updatedItem =
           await updateJobItemWithStatusTransition(
@@ -430,8 +457,10 @@ export const respondToQuote = async (
                     isFinalQuoteApproved: true,
 
                     onsiteRepairAuthorized:
-                      item.repairLocation ===
-                      'customer_site',
+                      isCustomerSite,
+
+                    inlabRepairAuthorized:
+                      isLab,
 
                     updatedAt: new Date(),
                   })
@@ -453,22 +482,97 @@ export const respondToQuote = async (
         updatedItems.push(updatedItem);
       }
 
+      // =======================================================
+      // JOB STATUS
+      // =======================================================
+
+      /*
+       * If ANY item is going to the lab:
+       *
+       * pending_final_quote
+       *          ↓
+       * repair_in_progress
+       *
+       * Otherwise all items are onsite:
+       *
+       * pending_final_quote
+       *          ↓
+       * repair_started
+       */
+
+      if (hasLabItem) {
+        await transitionJob({
+          jobId,
+          previousStatus:
+            job.currentStatus,
+          newStatus:
+            'repair_in_progress',
+          changedBy: userId,
+          note:
+            comment?.trim() ||
+            'Customer approved the final quote. Repair can now proceed.',
+          updateJob: async (transaction) => {
+            const [updatedJob] =
+              await transaction
+                .update(jobs)
+                .set({
+                  currentStatus:
+                    'repair_in_progress',
+                  updatedAt: new Date(),
+                })
+                .where(eq(jobs.id, jobId))
+                .returning();
+
+            return updatedJob;
+          },
+          existingTx: tx,
+        });
+      } else if (hasOnsiteItem) {
+        await transitionJob({
+          jobId,
+          previousStatus:
+            job.currentStatus,
+          newStatus:
+            'repair_started',
+          changedBy: userId,
+          note:
+            comment?.trim() ||
+            'Customer approved the final quote. Onsite repair can now begin.',
+          updateJob: async (transaction) => {
+            const [updatedJob] =
+              await transaction
+                .update(jobs)
+                .set({
+                  currentStatus:
+                    'repair_started',
+                  updatedAt: new Date(),
+                })
+                .where(eq(jobs.id, jobId))
+                .returning();
+
+            return updatedJob;
+          },
+          existingTx: tx,
+        });
+      }
+
       // -------------------------------------------------------
       // Job-level customer comment
       // -------------------------------------------------------
 
       await tx.insert(jobComments).values({
         jobId,
+        jobItemId: null,
         userId,
         comment:
           comment?.trim() ||
-          (
-            accepted
-              ? 'Customer approved the final job quote.'
-              : 'Customer rejected the final job quote.'
-          ),
+          'Customer approved the final job quote.',
       });
     });
+
+    // ---------------------------------------------------------
+    // Response
+    // ---------------------------------------------------------
 
     return res.status(200).json({
       message: accepted
@@ -496,3 +600,335 @@ export const respondToQuote = async (
   }
 };
 
+
+
+export const getCustomerPendingQuotes = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const customerId = req.user?.userId;
+
+    if (!customerId) {
+      return res.status(401).json({
+        error: 'Authentication required',
+      });
+    }
+
+    // ---------------------------------------------------------
+    // Find customer's jobs
+    // ---------------------------------------------------------
+
+    const customerJobs = await db
+      .select({
+        id: jobs.id,
+        jobNumber: jobs.jobNumber,
+        currentStatus: jobs.currentStatus,
+        createdAt: jobs.createdAt,
+        updatedAt: jobs.updatedAt,
+      })
+      .from(jobs)
+      .where(
+        eq(
+          jobs.customerId,
+          customerId,
+        ),
+      );
+
+    if (customerJobs.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        count: 0,
+        quotes: [],
+      });
+    }
+
+    const jobIds = customerJobs.map(
+      (job) => job.id,
+    );
+
+    // ---------------------------------------------------------
+    // Get all quotes for customer's jobs
+    // ---------------------------------------------------------
+
+    const allQuotes = await db
+      .select()
+      .from(jobQuotes)
+      .where(
+        inArray(
+          jobQuotes.jobId,
+          jobIds,
+        ),
+      )
+      .orderBy(
+        desc(jobQuotes.version),
+      );
+
+    // ---------------------------------------------------------
+    // Keep only latest quote per job
+    // ---------------------------------------------------------
+
+    const latestQuoteByJobId =
+      new Map<
+        string,
+        (typeof allQuotes)[number]
+      >();
+
+    for (const quote of allQuotes) {
+      if (
+        !latestQuoteByJobId.has(
+          quote.jobId,
+        )
+      ) {
+        latestQuoteByJobId.set(
+          quote.jobId,
+          quote,
+        );
+      }
+    }
+
+    // ---------------------------------------------------------
+    // Customer only needs quotes waiting for approval
+    // ---------------------------------------------------------
+
+    const pendingQuotes = [
+      ...latestQuoteByJobId.values(),
+    ].filter(
+      (quote) =>
+        quote.status === 'pending',
+    );
+
+    if (pendingQuotes.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        count: 0,
+        quotes: [],
+      });
+    }
+
+    const pendingQuoteIds =
+      pendingQuotes.map(
+        (quote) => quote.id,
+      );
+
+    // ---------------------------------------------------------
+    // Get quote items
+    // ---------------------------------------------------------
+
+    const quoteItems =
+      await db
+        .select({
+          quoteItem: jobItemQuotes,
+          jobItem: jobItems,
+        })
+        .from(jobItemQuotes)
+        .innerJoin(
+          jobItems,
+          eq(
+            jobItems.id,
+            jobItemQuotes.jobItemId,
+          ),
+        )
+        .where(
+          inArray(
+            jobItemQuotes.jobQuoteId,
+            pendingQuoteIds,
+          ),
+        );
+
+    // ---------------------------------------------------------
+    // Get quote item IDs
+    // ---------------------------------------------------------
+
+    const quoteItemIds =
+      quoteItems.map(
+        (row) => row.quoteItem.id,
+      );
+
+    // ---------------------------------------------------------
+    // Get components
+    // ---------------------------------------------------------
+
+    const quoteLines =
+      quoteItemIds.length > 0
+        ? await db
+          .select()
+          .from(
+            jobItemQuoteLines,
+          )
+          .where(
+            inArray(
+              jobItemQuoteLines.quoteId,
+              quoteItemIds,
+            ),
+          )
+          .orderBy(
+            jobItemQuoteLines.sortOrder,
+          )
+        : [];
+
+    // ---------------------------------------------------------
+    // Group components by quote item
+    // ---------------------------------------------------------
+
+    const linesByQuoteItemId =
+      new Map<
+        string,
+        typeof quoteLines
+      >();
+
+    for (const line of quoteLines) {
+      const existing =
+        linesByQuoteItemId.get(
+          line.quoteId,
+        );
+
+      if (existing) {
+        existing.push(line);
+      } else {
+        linesByQuoteItemId.set(
+          line.quoteId,
+          [line],
+        );
+      }
+    }
+
+    // ---------------------------------------------------------
+    // Job lookup
+    // ---------------------------------------------------------
+
+    const jobById = new Map(
+      customerJobs.map(
+        (job) => [
+          job.id,
+          job,
+        ],
+      ),
+    );
+
+    // ---------------------------------------------------------
+    // Build response
+    // ---------------------------------------------------------
+
+    const result = pendingQuotes.map(
+      (quote) => {
+        const job =
+          jobById.get(
+            quote.jobId,
+          );
+
+        const items =
+          quoteItems
+            .filter(
+              (row) =>
+                row.quoteItem
+                  .jobQuoteId ===
+                quote.id,
+            )
+            .map(
+              ({
+                quoteItem,
+                jobItem,
+              }) => {
+                const lines =
+                  linesByQuoteItemId.get(
+                    quoteItem.id,
+                  ) ?? [];
+
+                return {
+                  jobItemId:
+                    jobItem.id,
+
+                  deviceCategory:
+                    jobItem.deviceCategory,
+
+                  deviceSerialNumber:
+                    jobItem.deviceSerialNumber,
+
+                  issueDescription:
+                    jobItem.issueDescription,
+
+                  issueCategory:
+                    jobItem.issueCategory,
+
+                  repairLocation:
+                    jobItem.repairLocation,
+
+                  currentStatus:
+                    jobItem.currentStatus,
+
+                  components:
+                    lines.map(
+                      (line) => ({
+                        name:
+                          line.name,
+
+                        quantity:
+                          line.quantity,
+
+                        unitPrice:
+                          line.unitPrice,
+
+                        lineTotal:
+                          line.lineTotal,
+                      }),
+                    ),
+
+                  componentsCost:
+                    quoteItem.componentsCost,
+
+                  serviceCharge:
+                    quoteItem.serviceCharge,
+
+                  totalAmount:
+                    quoteItem.totalAmount,
+                };
+              },
+            );
+
+        return {
+          job,
+          quote: {
+            id: quote.id,
+            version:
+              quote.version,
+            status:
+              quote.status,
+            subtotal:
+              quote.subtotal,
+            serviceCharge:
+              quote.serviceCharge,
+            discount:
+              quote.discount,
+            tax:
+              quote.tax,
+            totalAmount:
+              quote.totalAmount,
+            createdByUserId:
+              quote.createdByUserId,
+            createdAt:
+              quote.createdAt,
+          },
+          items,
+        };
+      },
+    );
+
+    return res.status(200).json({
+      status: 'success',
+      count: result.length,
+      quotes: result,
+    });
+  } catch (error) {
+    console.error(
+      'Get customer pending quotes error:',
+      error,
+    );
+
+    return res.status(500).json({
+      status: 'error',
+      message:
+        'Failed to fetch pending quotes',
+    });
+  }
+};

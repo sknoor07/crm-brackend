@@ -12,17 +12,45 @@ export type AssignTransportPersonInput =
   z.infer<typeof assignTransportPersonSchema>;
 
 
-export const receiveLabSchema = z.object({
-  jobItemId: z
-    .string()
-    .uuid('Invalid job item ID format'),
+export const receiveLabSchema = z
+  .object({
+    jobItemId: z
+      .string()
+      .uuid('Invalid job item ID format')
+      .optional(),
 
-  comment: z
-    .string()
-    .trim()
-    .min(1, 'Comment is required')
-    .max(2000, 'Comment cannot exceed 2000 characters'),
-});
+    jobItemIds: z
+      .array(
+        z
+          .string()
+          .uuid('Invalid job item ID format'),
+      )
+      .min(
+        1,
+        'At least one job item ID is required',
+      )
+      .optional(),
+
+    comment: z
+      .string()
+      .trim()
+      .min(1, 'Comment is required')
+      .max(
+        2000,
+        'Comment cannot exceed 2000 characters',
+      )
+      .optional(),
+  })
+  .refine(
+    (data) =>
+      !!data.jobItemId !==
+      !!data.jobItemIds,
+    {
+      message:
+        'Provide either jobItemId or jobItemIds, not both.',
+      path: ['jobItemId'],
+    },
+  );
 
 export type ReceiveLabInput =
   z.infer<typeof receiveLabSchema>;
@@ -61,3 +89,5 @@ export type AssignDeliveryInput =
 
 export type AssignRepairManagerInput =
   z.infer<typeof assignRepairManagerSchema>;
+
+  

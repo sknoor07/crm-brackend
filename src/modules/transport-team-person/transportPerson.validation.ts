@@ -103,6 +103,220 @@ export const requestFinalQuoteSchema = z.object({
     .max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
+export const generateFinalQuoteSchema = z.object({
+  jobId: z.string().uuid('Invalid job ID format'),
+
+  /**
+   * Existing job items.
+   *
+   * CS can:
+   * - edit item details
+   * - add/remove/update components
+   * - include the item in the quote
+   */
+  items: z.array(
+    z.object({
+      jobItemId: z.string().uuid(
+        'Invalid job item ID format',
+      ),
+
+      /**
+       * Editable job-item information.
+       */
+      deviceCategory: z
+        .string()
+        .trim()
+        .min(1, 'Device category is required')
+        .max(
+          100,
+          'Device category cannot exceed 100 characters',
+        )
+        .optional(),
+
+      deviceSerialNumber: z
+        .string()
+        .trim()
+        .max(
+          50,
+          'Device serial number cannot exceed 50 characters',
+        )
+        .optional()
+        .nullable(),
+
+      issueDescription: z
+        .string()
+        .trim()
+        .min(1, 'Issue description is required')
+        .optional(),
+
+      issueCategory: z
+        .string()
+        .trim()
+        .max(
+          50,
+          'Issue category cannot exceed 50 characters',
+        )
+        .optional()
+        .nullable(),
+
+      repairLocation: z
+        .enum([
+          'customer_site',
+          'inlab',
+        ])
+        .optional(),
+
+      /**
+       * Complete component list for this quote version.
+       *
+       * Sending a new list replaces the components
+       * from the previous quote version.
+       */
+      components: z
+        .array(
+          z.object({
+            name: z
+              .string()
+              .trim()
+              .min(1, 'Component name is required'),
+
+            quantity: z
+              .number()
+              .positive(
+                'Component quantity must be greater than 0',
+              ),
+
+            unitPrice: z
+              .number()
+              .nonnegative(
+                'Component unit price cannot be negative',
+              ),
+          }),
+        )
+        .default([]),
+
+      /**
+       * Item-level audit comment.
+       */
+      comment: z
+        .string()
+        .trim()
+        .max(
+          2000,
+          'Item comment cannot exceed 2000 characters',
+        )
+        .optional(),
+    }),
+  ),
+
+  /**
+   * New items added by CS while preparing
+   * or revising the final quote.
+   */
+  addedItems: z
+    .array(
+      z.object({
+        deviceCategory: z
+          .string()
+          .trim()
+          .min(1, 'Device category is required')
+          .max(100),
+
+        deviceSerialNumber: z
+          .string()
+          .trim()
+          .max(50)
+          .optional()
+          .nullable(),
+
+        issueDescription: z
+          .string()
+          .trim()
+          .min(1, 'Issue description is required'),
+
+        issueCategory: z
+          .string()
+          .trim()
+          .max(50)
+          .optional()
+          .nullable(),
+
+        repairLocation: z.enum([
+          'customer_site',
+          'inlab',
+        ]),
+
+        components: z
+          .array(
+            z.object({
+              name: z
+                .string()
+                .trim()
+                .min(1),
+
+              quantity: z
+                .number()
+                .positive(),
+
+              unitPrice: z
+                .number()
+                .nonnegative(),
+            }),
+          )
+          .default([]),
+
+        comment: z
+          .string()
+          .trim()
+          .max(2000)
+          .optional(),
+      }),
+    )
+    .default([]),
+
+  /**
+   * Existing items that CS wants to remove
+   * from the quote.
+   */
+  removedItemIds: z
+    .array(
+      z.string().uuid(
+        'Invalid job item ID format',
+      ),
+    )
+    .default([]),
+
+  /**
+   * Job-level audit comment.
+   */
+  comment: z
+    .string()
+    .trim()
+    .min(1, 'Comment is required')
+    .max(
+      2000,
+      'Comment cannot exceed 2000 characters',
+    ),
+
+  discount: z
+    .number()
+    .nonnegative(
+      'Discount cannot be negative',
+    )
+    .default(0),
+
+  tax: z
+    .number()
+    .nonnegative(
+      'Tax cannot be negative',
+    )
+    .default(0),
+});
+
+export type GenerateFinalQuoteInput =
+  z.infer<typeof generateFinalQuoteSchema>;
+
+
 export const rejectJobItemSchema = z.object({
   jobItemId: z.string().uuid('Invalid job item ID format'),
 
@@ -113,8 +327,8 @@ export const rejectJobItemSchema = z.object({
     .max(2000, 'Comment cannot exceed 2000 characters'),
 });
 
-export const startAndFinishOnsiteRepairSchema = z.object({
-  jobItemId: z.string().uuid('Invalid job item ID format'),
+export const finishOnsiteRepairInput = z.object({
+  jobId: z.string().uuid('Invalid job item ID format'),
 
   comment: z
     .string()
@@ -172,8 +386,8 @@ export type RequestFinalQuoteInput =
 export type RejectJobItemInput =
   z.infer<typeof rejectJobItemSchema>;
 
-export type StartAndFinishOnsiteRepairInput =
-  z.infer<typeof startAndFinishOnsiteRepairSchema>;
+export type FinishOnsiteRepairInput =
+  z.infer<typeof finishOnsiteRepairInput>;
 
 export type CompleteOnsiteRepairInput =
   z.infer<typeof completeOnsiteRepairSchema>;

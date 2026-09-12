@@ -2,20 +2,12 @@ import { Router } from 'express';
 
 import {
   getAssignedJobs,
-  inspectJobItem,
-  sendItemToLab,
-  requestFinalQuote,
-  rejectJobItem,
-  startOnsiteRepair,
-  completeOnsiteRepair,
   getAssignedDeliveryJobs,
   startDelivery,
   deliverItem,
-  startTransportJobVisit,
-  finishOnsiteRepair,
-  sendJobforInspectionAtLab,
   getjobdetailswithestimatedquote,
   completeTransportInspection,
+  finishOnsiteRepair,
 } from './transportPerson.controller.js';
 
 import {
@@ -26,7 +18,7 @@ import {
   completeOnsiteRepairSchema,
   startDeliverySchema,
   deliverItemSchema,
-  startAndFinishOnsiteRepairSchema,
+  finishOnsiteRepairInput,
   completeTransportInspectionSchema,
 } from './transportPerson.validation.js';
 
@@ -97,67 +89,67 @@ router.post('/complete-inspection',requireRole(transportRoles), validateRequest(
 
 
 
-router.patch(
-  '/:jobId/send-job-to-lab',
-  requireRole(transportRoles),
-  validateRequest(jobIdParamsSchema, 'params'),
-  sendJobforInspectionAtLab
-);
+// router.patch(
+//   '/:jobId/send-job-to-lab',
+//   requireRole(transportRoles),
+//   validateRequest(jobIdParamsSchema, 'params'),
+//   sendJobforInspectionAtLab
+// );
+
+// // router.patch(
+// //   '/inspect-item',
+// //   requireRole(transportRoles),
+// //   validateRequest(inspectJobItemSchema),
+// //   inspectJobItem,
+// // );
+
+// // router.patch(
+// //   '/send-item-to-lab',
+// //   requireRole(transportRoles),
+// //   validateRequest(sendItemToLabSchema),
+// //   sendItemToLab,
+// // );
+
+
+// /*
+// |--------------------------------------------------------------------------
+// | Onsite Repair
+// |--------------------------------------------------------------------------
+// */
 
 // router.patch(
-//   '/inspect-item',
+//   '/request-final-quote',
 //   requireRole(transportRoles),
-//   validateRequest(inspectJobItemSchema),
-//   inspectJobItem,
+//   validateRequest(requestFinalQuoteSchema),
+//   requestFinalQuote,
 // );
 
 // router.patch(
-//   '/send-item-to-lab',
+//   '/reject-item',
 //   requireRole(transportRoles),
-//   validateRequest(sendItemToLabSchema),
-//   sendItemToLab,
+//   validateRequest(rejectJobItemSchema),
+//   rejectJobItem,
 // );
 
-
-/*
-|--------------------------------------------------------------------------
-| Onsite Repair
-|--------------------------------------------------------------------------
-*/
-
-router.patch(
-  '/request-final-quote',
-  requireRole(transportRoles),
-  validateRequest(requestFinalQuoteSchema),
-  requestFinalQuote,
-);
-
-router.patch(
-  '/reject-item',
-  requireRole(transportRoles),
-  validateRequest(rejectJobItemSchema),
-  rejectJobItem,
-);
-
-router.patch(
-  '/start-repair',
-  requireRole(transportRoles),
-  validateRequest(startAndFinishOnsiteRepairSchema),
-  startOnsiteRepair,
-);
+// router.patch(
+//   '/start-repair',
+//   requireRole(transportRoles),
+//   validateRequest(startAndFinishOnsiteRepairSchema),
+//   startOnsiteRepair,
+// );
 router.patch(
   '/finish-repair',
   requireRole(transportRoles),
-  validateRequest(startAndFinishOnsiteRepairSchema),
+  validateRequest(finishOnsiteRepairInput),
   finishOnsiteRepair,
 );
 
-router.patch(
-  '/complete-repair',
-  requireRole(transportRoles),
-  validateRequest(completeOnsiteRepairSchema),
-  completeOnsiteRepair,
-);
+// router.patch(
+//   '/complete-repair',
+//   requireRole(transportRoles),
+//   validateRequest(completeOnsiteRepairSchema),
+//   completeOnsiteRepair,
+// );
 
 
 /*

@@ -245,6 +245,7 @@ export const getPendingRepairAssignments =
  *            ↓
  * assigned_to_repair_person
  */
+
 export const assignRepairPerson = async (
   req: Request<
     {},
@@ -302,15 +303,18 @@ export const assignRepairPerson = async (
     }
 
     /*
-     * Item must be waiting for assignment.
+     * Item must have been assigned to the
+     * Repair Team Manager first.
      */
     if (
       item.currentStatus !==
-      'pending_repair_assignment'
+      'assigned_to_repair_manager'
     ) {
       return res.status(400).json({
         error:
-          `Item must be 'pending_repair_assignment' to be assigned. Current status: '${item.currentStatus}'.`,
+          `Item must be 'assigned_to_repair_manager' ` +
+          `to be assigned to a Repair Person. ` +
+          `Current status: '${item.currentStatus}'.`,
       });
     }
 
@@ -329,6 +333,10 @@ export const assignRepairPerson = async (
       });
     }
 
+    /*
+     * Assign Repair Person and move item into
+     * the Repair Person workflow.
+     */
     const updatedItem =
       await updateJobItemWithStatusTransition(
         item.id,
@@ -361,7 +369,8 @@ export const assignRepairPerson = async (
         },
 
         managerId,
-        comment,
+        comment ||
+          'Repair Person assigned to item',
       );
 
     return res.status(200).json({
@@ -380,6 +389,7 @@ export const assignRepairPerson = async (
     });
   }
 };
+
 
 
 /*
@@ -584,6 +594,8 @@ export const startDiagnosis = async (
  *
  * CS is responsible for the customer quote.
  */
+
+
 export const requestFinalQuote = async (
   req: Request<
     {},
@@ -621,7 +633,12 @@ export const requestFinalQuote = async (
 
     const {
       item,
+      job,
     } = result;
+
+    /* -----------------------------------------------------
+       Verify Repair Person authorization
+       ----------------------------------------------------- */
 
     if (
       !isRepairPersonAuthorized(
@@ -636,57 +653,186 @@ export const requestFinalQuote = async (
       });
     }
 
+    /* -----------------------------------------------------
+       Validate current item status
+       ----------------------------------------------------- */
+
     if (
       item.currentStatus !==
-      'diagnosis_in_progress'
+      'assigned_to_repair_person'
     ) {
       return res.status(400).json({
         error:
-          `Cannot complete diagnosis from '${item.currentStatus}'.`,
+          `Cannot complete diagnosis from ` +
+          `'${item.currentStatus}'. ` +
+          `Item must be 'assigned_to_repair_person'.`,
       });
     }
 
+    /* -----------------------------------------------------
+       Complete diagnosis and check job aggregate state
+       atomically
+       ----------------------------------------------------- */
+
     const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'pending_final_quote',
+      await db.transaction(async (tx) => {
+        /*
+         * Move this item:
+         *
+         * assigned_to_repair_person
+         *             ↓
+         * pending_final_quote
+         */
+        const updated =
+          await updateJobItemWithStatusTransition(
+            item.id,
 
-        async (
-          tx: Parameters<
-            Parameters<typeof db.transaction>[0]
-          >[0],
-        ) => {
-          const [updated] = await tx
-            .update(jobItems)
-            .set({
-              requestedComponents:
-                requestedComponents || null,
+            item.currentStatus,
 
-              diagnosisNotes:
-                diagnosisNotes || null,
+            'pending_final_quote',
 
-              updatedAt:
-                new Date(),
-            })
-            .where(
-              eq(
-                jobItems.id,
-                item.id,
-              ),
-            )
-            .returning();
+            async (transaction) => {
+              const [updatedItem] =
+                await transaction
+                  .update(jobItems)
+                  .set({
+                    requestedComponents:
+                      requestedComponents || null,
 
-          return updated;
-        },
+                    diagnosisNotes:
+                      diagnosisNotes || null,
 
-        userId,
-        comment,
-      );
+                    updatedAt:
+                      new Date(),
+                  })
+                  .where(
+                    eq(
+                      jobItems.id,
+                      item.id,
+                    ),
+                  )
+                  .returning();
+
+              return updatedItem;
+            },
+
+            userId,
+
+            comment?.trim() ||
+              'Diagnosis completed. Item sent for final quotation.',
+
+            tx,
+          );
+
+        /* -------------------------------------------------
+           Check ALL job items after this transition
+           ------------------------------------------------- */
+
+        const allJobItems = await tx
+          .select()
+          .from(jobItems)
+          .where(
+            eq(
+              jobItems.jobId,
+              job.id,
+            ),
+          );
+
+        /*
+         * These items do not participate in the
+         * final quote readiness check.
+         *
+         * repair_rejected:
+         *   Permanently rejected and not part of quote.
+         *
+         * cancelled:
+         *   No longer active.
+         *
+         * removed_from_quote:
+         *   Explicitly removed by CS.
+         */
+        const applicableItems =
+          allJobItems.filter(
+            (jobItem) =>
+              jobItem.currentStatus !==
+                'repair_rejected' &&
+              jobItem.currentStatus !==
+                'cancelled' &&
+              jobItem.currentStatus !==
+                'removed_from_quote',
+          );
+
+        /*
+         * The job is ready for final quotation only
+         * when every applicable item is ready.
+         */
+        const allItemsReady =
+          applicableItems.length > 0 &&
+          applicableItems.every(
+            (jobItem) =>
+              jobItem.currentStatus ===
+              'pending_final_quote',
+          );
+
+        /* -------------------------------------------------
+           Move job into pending_final_quote only when
+           the LAST applicable item becomes ready.
+           ------------------------------------------------- */
+
+        if (
+          allItemsReady &&
+          job.currentStatus ===
+            'repair_in_progress'
+        ) {
+          await transitionJob({
+            jobId: job.id,
+
+            previousStatus:
+              job.currentStatus,
+
+            newStatus:
+              'pending_final_quote',
+
+            changedBy: userId,
+
+            note:
+              'All applicable job items are ready for final quotation',
+
+            updateJob: async (
+              transaction,
+            ) => {
+              const [updatedJob] =
+                await transaction
+                  .update(jobs)
+                  .set({
+                    currentStatus:
+                      'pending_final_quote',
+
+                    updatedAt:
+                      new Date(),
+                  })
+                  .where(
+                    eq(
+                      jobs.id,
+                      job.id,
+                    ),
+                  )
+                  .returning();
+
+              return updatedJob;
+            },
+
+            existingTx: tx,
+          });
+        }
+
+        return updated;
+      });
 
     return res.status(200).json({
       message:
         'Diagnosis completed. Item sent to Customer Service for final quotation.',
+
       item: updatedItem,
     });
   } catch (error) {
@@ -696,10 +842,16 @@ export const requestFinalQuote = async (
     );
 
     return res.status(500).json({
-      error: 'Internal server error',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Internal server error',
     });
   }
 };
+
+
+
 
 
 /**

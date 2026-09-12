@@ -904,8 +904,238 @@ export const getjobDetails = async (req: Request<JobParams>, res: Response) => {
 type DbTransaction = Parameters<
   Parameters<typeof db.transaction>[0]
 >[0];
-export const getPendingFinalQuotes = async (req: Request, res: Response,) => {
-  try { const rows = await db.select({ job: jobs, item: jobItems, customer: customerProfiles, }).from(jobs).innerJoin(jobItems, eq(jobItems.jobId, jobs.id),).leftJoin(customerProfiles, eq(customerProfiles.userId, jobs.customerId,),).where(and(eq(jobs.currentStatus, 'pending_final_quote_onsite',), or(eq(jobItems.currentStatus, 'pending_final_quote',), eq(jobItems.currentStatus, 'repair_rejected',),),),).orderBy(desc(jobItems.updatedAt),); if (rows.length === 0) { return res.status(200).json({ status: 'success', count: 0, jobs: [], }); } const jobIds = [...new Set(rows.map((row) => row.job.id,),),]; const itemIds = [...new Set(rows.map((row) => row.item.id,),),]; const comments = jobIds.length > 0 ? await db.select({ id: jobComments.id, jobId: jobComments.jobId, jobItemId: jobComments.jobItemId, userId: jobComments.userId, comment: jobComments.comment, createdAt: jobComments.createdAt, }).from(jobComments).where(or(inArray(jobComments.jobId, jobIds,), inArray(jobComments.jobItemId, itemIds,),),).orderBy(desc(jobComments.createdAt,), desc(jobComments.id),) : []; const latestJobComments = new Map<string, (typeof comments)[number]>(); const latestItemComments = new Map<string, (typeof comments)[number]>(); for (const comment of comments) { if (comment.jobId && !latestJobComments.has(comment.jobId,)) { latestJobComments.set(comment.jobId, comment,); } if (comment.jobItemId && !latestItemComments.has(comment.jobItemId,)) { latestItemComments.set(comment.jobItemId, comment,); } } const allQuotes = await db.select().from(jobQuotes).where(inArray(jobQuotes.jobId, jobIds,),).orderBy(desc(jobQuotes.version),); const latestQuoteByJobId = new Map<string, (typeof allQuotes)[number]>(); for (const quote of allQuotes) { if (!latestQuoteByJobId.has(quote.jobId,)) { latestQuoteByJobId.set(quote.jobId, quote,); } } const latestQuoteIds = [...latestQuoteByJobId.values(),].map((quote) => quote.id,); const quoteItems = latestQuoteIds.length > 0 ? await db.select({ quoteItem: jobItemQuotes, jobItem: jobItems, }).from(jobItemQuotes).innerJoin(jobItems, eq(jobItems.id, jobItemQuotes.jobItemId,),).where(inArray(jobItemQuotes.jobQuoteId, latestQuoteIds,),) : []; const quoteItemIds = quoteItems.map((row) => row.quoteItem.id,); const quoteLines = quoteItemIds.length > 0 ? await db.select().from(jobItemQuoteLines).where(inArray(jobItemQuoteLines.quoteId, quoteItemIds,),).orderBy(jobItemQuoteLines.sortOrder,) : []; const quoteLinesByQuoteItemId = new Map<string, typeof quoteLines>(); for (const line of quoteLines) { const existing = quoteLinesByQuoteItemId.get(line.quoteId,); if (existing) { existing.push(line); } else { quoteLinesByQuoteItemId.set(line.quoteId, [line],); } } const groupedJobs = new Map<string, { job: typeof rows[number]['job']; customer: typeof rows[number]['customer']; items: typeof rows[number]['item'][]; }>(); for (const row of rows) { const existing = groupedJobs.get(row.job.id,); if (existing) { existing.items.push(row.item,); } else { groupedJobs.set(row.job.id, { job: row.job, customer: row.customer, items: [row.item], },); } } const toLatestComment = (comment: | (typeof comments)[number] | undefined,) => comment ? { id: comment.id, userId: comment.userId, comment: comment.comment, createdAt: comment.createdAt, } : null; const result = Array.from(groupedJobs.values(),).map(({ job, customer, items, }) => { const itemsWithLatestComment = items.map((item) => ({ ...item, latestComment: toLatestComment(latestItemComments.get(item.id,),), }),); const quoteRequiredItems = itemsWithLatestComment.filter((item) => item.currentStatus === 'pending_final_quote',); const rejectedItems = itemsWithLatestComment.filter((item) => item.currentStatus === 'repair_rejected',); const allItemsRejected = items.length > 0 && items.every((item) => item.currentStatus === 'repair_rejected',); const latestQuote = latestQuoteByJobId.get(job.id,); const quotedItems = latestQuote ? quoteItems.filter((quoteItem) => quoteItem.quoteItem.jobQuoteId === latestQuote.id,).map(({ quoteItem, jobItem, }) => { const lines = quoteLinesByQuoteItemId.get(quoteItem.id,) ?? []; return { jobItemId: quoteItem.jobItemId, deviceCategory: jobItem.deviceCategory, deviceSerialNumber: jobItem.deviceSerialNumber, issueDescription: jobItem.issueDescription, issueCategory: jobItem.issueCategory, repairLocation: jobItem.repairLocation, currentStatus: jobItem.currentStatus, components: lines.map((line) => ({ name: line.name, quantity: line.quantity, unitPrice: line.unitPrice, lineTotal: line.lineTotal, }),), componentsCost: quoteItem.componentsCost, serviceCharge: quoteItem.serviceCharge, totalAmount: quoteItem.totalAmount, }; },) : []; return { job: { ...job, latestComment: toLatestComment(latestJobComments.get(job.id,),), }, customer, latestQuote: latestQuote ? { id: latestQuote.id, jobId: latestQuote.jobId, version: latestQuote.version, status: latestQuote.status, subtotal: latestQuote.subtotal, serviceCharge: latestQuote.serviceCharge, discount: latestQuote.discount, tax: latestQuote.tax, totalAmount: latestQuote.totalAmount, createdByUserId: latestQuote.createdByUserId, createdAt: latestQuote.createdAt, } : null, quotedItems, items: itemsWithLatestComment, quoteRequiredItems, rejectedItems, allItemsRejected, }; },); return res.status(200).json({ status: 'success', count: result.length, jobs: result, }); } catch (error) { console.error('Error fetching jobs pending final quote:', error,); return res.status(500).json({ status: 'error', message: 'Failed to fetch jobs pending final quote', }); }
+
+export const getPendingFinalQuotes = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    // --------------------------------------------------
+    // 1. Get jobs waiting for final quote
+    // --------------------------------------------------
+
+    const jobsPendingQuote = await db
+      .select({
+        job: jobs,
+        customer: customerProfiles,
+      })
+      .from(jobs)
+      .leftJoin(
+        customerProfiles,
+        eq(customerProfiles.userId, jobs.customerId),
+      )
+      .where(
+        eq(
+          jobs.currentStatus,
+          'pending_final_quote',
+        ),
+      )
+      .orderBy(desc(jobs.updatedAt));
+
+    if (jobsPendingQuote.length === 0) {
+      return res.status(200).json({
+        status: 'success',
+        count: 0,
+        jobs: [],
+      });
+    }
+
+    const jobIds = jobsPendingQuote.map(
+      ({ job }) => job.id,
+    );
+
+    // --------------------------------------------------
+    // 2. Get ONLY items pending final quote
+    // --------------------------------------------------
+
+    const pendingQuoteItems = await db
+      .select()
+      .from(jobItems)
+      .where(
+        and(
+          inArray(jobItems.jobId, jobIds),
+          eq(
+            jobItems.currentStatus,
+            'pending_final_quote',
+          ),
+        ),
+      )
+      .orderBy(desc(jobItems.updatedAt));
+
+    const itemIds = pendingQuoteItems.map(
+      (item) => item.id,
+    );
+
+    // --------------------------------------------------
+    // 3. Get latest comments for jobs/items
+    // --------------------------------------------------
+
+    const comments =
+      jobIds.length > 0 || itemIds.length > 0
+        ? await db
+          .select({
+            id: jobComments.id,
+            jobId: jobComments.jobId,
+            jobItemId: jobComments.jobItemId,
+            userId: jobComments.userId,
+            comment: jobComments.comment,
+            createdAt: jobComments.createdAt,
+          })
+          .from(jobComments)
+          .where(
+            or(
+              inArray(
+                jobComments.jobId,
+                jobIds,
+              ),
+              itemIds.length > 0
+                ? inArray(
+                  jobComments.jobItemId,
+                  itemIds,
+                )
+                : undefined,
+            ),
+          )
+          .orderBy(
+            desc(jobComments.createdAt),
+            desc(jobComments.id),
+          )
+        : [];
+
+    // --------------------------------------------------
+    // 4. Keep latest comment per job/item
+    // --------------------------------------------------
+
+    const latestJobComments = new Map<
+      string,
+      (typeof comments)[number]
+    >();
+
+    const latestItemComments = new Map<
+      string,
+      (typeof comments)[number]
+    >();
+
+    for (const comment of comments) {
+      if (
+        comment.jobId &&
+        !latestJobComments.has(comment.jobId)
+      ) {
+        latestJobComments.set(
+          comment.jobId,
+          comment,
+        );
+      }
+
+      if (
+        comment.jobItemId &&
+        !latestItemComments.has(
+          comment.jobItemId,
+        )
+      ) {
+        latestItemComments.set(
+          comment.jobItemId,
+          comment,
+        );
+      }
+    }
+
+    // --------------------------------------------------
+    // 5. Helper
+    // --------------------------------------------------
+
+    const toLatestComment = (
+      comment:
+        | (typeof comments)[number]
+        | undefined,
+    ) =>
+      comment
+        ? {
+          id: comment.id,
+          userId: comment.userId,
+          comment: comment.comment,
+          createdAt: comment.createdAt,
+        }
+        : null;
+
+    // --------------------------------------------------
+    // 6. Group items by job
+    // --------------------------------------------------
+
+    const itemsByJobId = new Map<
+      string,
+      typeof pendingQuoteItems
+    >();
+
+    for (const item of pendingQuoteItems) {
+      const existing =
+        itemsByJobId.get(item.jobId);
+
+      if (existing) {
+        existing.push(item);
+      } else {
+        itemsByJobId.set(
+          item.jobId,
+          [item],
+        );
+      }
+    }
+
+    // --------------------------------------------------
+    // 7. Build response
+    // --------------------------------------------------
+
+    const result = jobsPendingQuote.map(
+      ({ job, customer }) => {
+        const items =
+          itemsByJobId.get(job.id) ?? [];
+
+        return {
+          job: {
+            ...job,
+            latestComment:
+              toLatestComment(
+                latestJobComments.get(job.id),
+              ),
+          },
+
+          customer,
+
+          items: items.map((item) => ({
+            ...item,
+
+            latestComment:
+              toLatestComment(
+                latestItemComments.get(
+                  item.id,
+                ),
+              ),
+          })),
+        };
+      },
+    );
+
+    // --------------------------------------------------
+    // 8. Response
+    // --------------------------------------------------
+
+    return res.status(200).json({
+      status: 'success',
+      count: result.length,
+      jobs: result,
+    });
+  } catch (error) {
+    console.error(
+      'Error fetching jobs pending final quote:',
+      error,
+    );
+
+    return res.status(500).json({
+      status: 'error',
+      message:
+        'Failed to fetch jobs pending final quote',
+    });
+  }
 };
 
 
@@ -925,17 +1155,19 @@ export const generateFinalQuote = async (
     const {
       jobId,
       items,
-      addedItems,
-      removedItemIds,
       comment,
-      discount,
-      tax,
+      discount = 0,
+      tax = 0,
     } = req.body;
 
+    const jobComment =
+      comment?.trim() ||
+      'Final quote generated';
+
     const result = await db.transaction(async (tx) => {
-      // =========================================================
-      // 1. Load job
-      // =========================================================
+      // --------------------------------------------------
+      // 1. Get job
+      // --------------------------------------------------
 
       const [job] = await tx
         .select()
@@ -947,23 +1179,70 @@ export const generateFinalQuote = async (
         throw new Error('Job not found');
       }
 
+      // --------------------------------------------------
+      // 2. Job must be pending final quote
+      // --------------------------------------------------
+
       if (
         job.currentStatus !==
-        'pending_final_quote_onsite'
+        'pending_final_quote'
       ) {
         throw new Error(
-          `Final quote cannot be generated while job is in ${job.currentStatus} status`,
+          `Final quote can only be generated when job status is pending_final_quote. Current status: ${job.currentStatus}`,
         );
       }
 
-      // =========================================================
-      // 2. Load all existing items
-      // =========================================================
+      // --------------------------------------------------
+      // 3. Get ALL job items
+      // --------------------------------------------------
 
       const existingItems = await tx
         .select()
         .from(jobItems)
-        .where(eq(jobItems.jobId, jobId));
+        .where(
+          eq(jobItems.jobId, jobId),
+        );
+
+      if (existingItems.length === 0) {
+        throw new Error(
+          'Cannot generate final quote because the job has no items',
+        );
+      }
+
+      // --------------------------------------------------
+      // 4. Every job item must be pending_final_quote
+      // --------------------------------------------------
+
+      const notReadyItems =
+        existingItems.filter(
+          (item) =>
+            item.currentStatus !==
+            'pending_final_quote',
+        );
+
+      if (notReadyItems.length > 0) {
+        throw new Error(
+          'Final quote cannot be generated because all job items must be in pending_final_quote status. ' +
+          `Items not ready: ${notReadyItems
+            .map(
+              (item) =>
+                `${item.id} (${item.currentStatus})`,
+            )
+            .join(', ')}`,
+        );
+      }
+
+      // --------------------------------------------------
+      // 5. Validate submitted items
+      //
+      // CS can only update components of existing items.
+      // --------------------------------------------------
+
+      if (items.length !== existingItems.length) {
+        throw new Error(
+          'All job items must be included in the final quote',
+        );
+      }
 
       const existingItemMap = new Map(
         existingItems.map((item) => [
@@ -972,11 +1251,13 @@ export const generateFinalQuote = async (
         ]),
       );
 
-      // =========================================================
-      // 3. Validate included existing items
-      // =========================================================
+      const submittedItemIds = new Set<string>();
 
       for (const inputItem of items) {
+        // ----------------------------------------------
+        // Item must belong to this job
+        // ----------------------------------------------
+
         const existingItem =
           existingItemMap.get(
             inputItem.jobItemId,
@@ -988,91 +1269,78 @@ export const generateFinalQuote = async (
           );
         }
 
-        if (
-          existingItem.currentStatus !==
-          'pending_final_quote'
-        ) {
-          throw new Error(
-            `Job item ${inputItem.jobItemId} cannot be included in the final quote from status ${existingItem.currentStatus}`,
-          );
-        }
-      }
-
-      // =========================================================
-      // 4. Validate removed items
-      // =========================================================
-
-      for (const jobItemId of removedItemIds) {
-        const existingItem =
-          existingItemMap.get(jobItemId);
-
-        if (!existingItem) {
-          throw new Error(
-            `Job item ${jobItemId} does not belong to this job`,
-          );
-        }
+        // ----------------------------------------------
+        // Item must still be pending final quote
+        // ----------------------------------------------
 
         if (
           existingItem.currentStatus !==
           'pending_final_quote'
         ) {
           throw new Error(
-            `Job item ${jobItemId} cannot be removed from the final quote from status ${existingItem.currentStatus}`,
+            `Job item ${inputItem.jobItemId} is not in pending_final_quote status`,
           );
         }
-      }
 
-      // =========================================================
-      // 5. Prevent include + remove conflict
-      // =========================================================
+        // ----------------------------------------------
+        // Prevent duplicate item entries
+        // ----------------------------------------------
 
-      const includedItemIds = new Set(
-        items.map(
-          (item) => item.jobItemId,
-        ),
-      );
-
-      for (const removedItemId of removedItemIds) {
         if (
-          includedItemIds.has(
-            removedItemId,
+          submittedItemIds.has(
+            inputItem.jobItemId,
           )
         ) {
           throw new Error(
-            `Job item ${removedItemId} cannot be both included and removed`,
+            `Job item ${inputItem.jobItemId} was submitted more than once`,
+          );
+        }
+
+        submittedItemIds.add(
+          inputItem.jobItemId,
+        );
+      }
+
+      // --------------------------------------------------
+      // 6. Make sure no existing item was omitted
+      // --------------------------------------------------
+
+      for (const existingItem of existingItems) {
+        if (
+          !submittedItemIds.has(
+            existingItem.id,
+          )
+        ) {
+          throw new Error(
+            `Job item ${existingItem.id} is missing from the final quote`,
           );
         }
       }
 
-      // =========================================================
-      // 6. Get latest quote version
-      // =========================================================
+      // --------------------------------------------------
+      // 7. Get latest quote version
+      // --------------------------------------------------
 
       const [latestQuote] = await tx
         .select()
         .from(jobQuotes)
-        .where(eq(jobQuotes.jobId, jobId))
-        .orderBy(desc(jobQuotes.version))
+        .where(
+          eq(
+            jobQuotes.jobId,
+            jobId,
+          ),
+        )
+        .orderBy(
+          desc(jobQuotes.version),
+        )
         .limit(1);
-
-      // ---------------------------------------------------------
-      // A FINAL quote is immutable.
-      // ---------------------------------------------------------
-
-      if (
-        latestQuote?.status === 'final'
-      ) {
-        throw new Error(
-          `Final quote v${latestQuote.version} cannot be revised because it has already been accepted by the customer`,
-        );
-      }
 
       const nextVersion =
         (latestQuote?.version ?? 0) + 1;
 
-      // =========================================================
-      // 7. Create new JOB quote version
-      // =========================================================
+      // --------------------------------------------------
+      // 8. Create job quote
+      // --------------------------------------------------
 
       const [jobQuote] = await tx
         .insert(jobQuotes)
@@ -1083,8 +1351,8 @@ export const generateFinalQuote = async (
           subtotal: '0.00',
           serviceCharge: '0.00',
 
-          discount: discount.toFixed(2),
-          tax: tax.toFixed(2),
+          discount: Number(discount).toFixed(2),
+          tax: Number(tax).toFixed(2),
 
           totalAmount: '0.00',
 
@@ -1094,12 +1362,12 @@ export const generateFinalQuote = async (
         })
         .returning();
 
-      // =========================================================
-      // 8. Process existing items included in final quote
-      // =========================================================
-
       let subtotal = 0;
       let totalServiceCharge = 0;
+
+      // --------------------------------------------------
+      // 9. Create quote for every existing job item
+      // --------------------------------------------------
 
       for (const inputItem of items) {
         const existingItem =
@@ -1107,204 +1375,28 @@ export const generateFinalQuote = async (
             inputItem.jobItemId,
           )!;
 
+        // ----------------------------------------------
+        // Calculate service charge from existing item
+        //
+        // No job item fields are modified here.
+        // ----------------------------------------------
+
         const serviceCharge =
           await calculateServiceCharge(
             existingItem,
             tx,
           );
 
-        const quoteResult =
-          await insertJobItemQuoteWithLines(
-            tx,
-            {
-              jobQuoteId: jobQuote.id,
-
-              jobItemId:
-                existingItem.id,
-
-              components:
-                inputItem.components,
-
-              serviceCharge,
-
-              createdByUserId:
-                csUserId,
-            },
-          );
-
-        subtotal +=
-          quoteResult.componentsCost;
-
-        totalServiceCharge +=
-          quoteResult.serviceChargeAmount;
-
-        const itemComment =
-          inputItem.comment?.trim() ||
-          comment.trim();
-
-        // -------------------------------------------------------
-        // pending_final_quote
-        //        ↓
-        // awaiting_customer_approval
-        // -------------------------------------------------------
-
-        await updateJobItemWithStatusTransition(
-          existingItem.id,
-
-          existingItem.currentStatus,
-
-          'awaiting_customer_approval',
-
-          async (transaction) => {
-            const [updatedItem] =
-              await transaction
-                .update(jobItems)
-                .set({
-                  currentStatus:
-                    'awaiting_customer_approval',
-
-                  finalComponentsCost:
-                    quoteResult.componentsCost.toFixed(
-                      2,
-                    ),
-
-                  serviceChargeApplied:
-                    quoteResult.serviceChargeAmount.toFixed(
-                      2,
-                    ),
-
-                  isFinalQuoteApproved: false,
-
-                  onsiteRepairAuthorized:
-                    false,
-
-                  updatedAt: new Date(),
-                })
-                .where(
-                  eq(
-                    jobItems.id,
-                    existingItem.id,
-                  ),
-                )
-                .returning();
-
-            return updatedItem;
-          },
-
-          csUserId,
-
-          itemComment,
-
-          tx,
-        );
-      }
-
-      // =========================================================
-      // 9. Process removed items
-      // =========================================================
-
-      for (const jobItemId of removedItemIds) {
-        const existingItem =
-          existingItemMap.get(
-            jobItemId,
-          )!;
-
-        await updateJobItemWithStatusTransition(
-          existingItem.id,
-
-          existingItem.currentStatus,
-
-          'removed_from_quote',
-
-          async (transaction) => {
-            const [updatedItem] =
-              await transaction
-                .update(jobItems)
-                .set({
-                  currentStatus:
-                    'removed_from_quote',
-
-                  finalComponentsCost:
-                    null,
-
-                  serviceChargeApplied:
-                    null,
-
-                  isFinalQuoteApproved:
-                    false,
-
-                  onsiteRepairAuthorized:
-                    false,
-
-                  updatedAt: new Date(),
-                })
-                .where(
-                  eq(
-                    jobItems.id,
-                    existingItem.id,
-                  ),
-                )
-                .returning();
-
-            return updatedItem;
-          },
-
-          csUserId,
-
-          `Removed from final quote: ${comment.trim()}`,
-
-          tx,
-        );
-      }
-
-      // =========================================================
-      // 10. Create NEW job items
-      // =========================================================
-
-      for (const newItem of addedItems) {
-        const [createdItem] =
-          await tx
-            .insert(jobItems)
-            .values({
-              jobId,
-
-              deviceCategory:
-                newItem.deviceCategory,
-
-              deviceSerialNumber:
-                newItem.deviceSerialNumber,
-
-              issueDescription:
-                newItem.issueDescription,
-
-              issueCategory:
-                newItem.issueCategory,
-
-              repairLocation:
-                newItem.repairLocation,
-
-              currentStatus: 'created',
-
-              isApprovedByCS: true,
-
-              isFinalQuoteApproved:
-                false,
-            })
-            .returning();
-
-        // -------------------------------------------------------
-        // Calculate service charge
-        // -------------------------------------------------------
-
-        const serviceCharge =
-          await calculateServiceCharge(
-            createdItem,
-            tx,
-          );
-
-        // -------------------------------------------------------
-        // Create item quote linked to JOB quote version
-        // -------------------------------------------------------
+        // ----------------------------------------------
+        // Create quote item + components
+        //
+        // Components come from CS request.
+        // This allows CS to:
+        // - add components
+        // - remove components
+        // - edit quantity
+        // - edit unit price
+        // ----------------------------------------------
 
         const quoteResult =
           await insertJobItemQuoteWithLines(
@@ -1314,10 +1406,10 @@ export const generateFinalQuote = async (
                 jobQuote.id,
 
               jobItemId:
-                createdItem.id,
+                existingItem.id,
 
               components:
-                newItem.components,
+                inputItem.components ?? [],
 
               serviceCharge,
 
@@ -1332,71 +1424,53 @@ export const generateFinalQuote = async (
         totalServiceCharge +=
           quoteResult.serviceChargeAmount;
 
-        const itemComment =
-          newItem.comment?.trim() ||
-          comment.trim();
-
-        // -------------------------------------------------------
-        // created
-        //    ↓
-        // awaiting_customer_approval
-        // -------------------------------------------------------
+        // ----------------------------------------------
+        // Move item to customer approval
+        // ----------------------------------------------
 
         await updateJobItemWithStatusTransition(
-          createdItem.id,
-
-          'created',
-
+          existingItem.id,
+          'pending_final_quote',
           'awaiting_customer_approval',
-
           async (transaction) => {
-            const [updatedItem] =
-              await transaction
-                .update(jobItems)
-                .set({
-                  currentStatus:
-                    'awaiting_customer_approval',
+            const [updatedItem] = await transaction
+              .update(jobItems)
+              .set({
+                currentStatus:
+                  'awaiting_customer_approval',
 
-                  finalComponentsCost:
-                    quoteResult.componentsCost.toFixed(
-                      2,
-                    ),
+                finalComponentsCost:
+                  quoteResult.componentsCost.toFixed(2),
 
-                  serviceChargeApplied:
-                    quoteResult.serviceChargeAmount.toFixed(
-                      2,
-                    ),
+                serviceChargeApplied:
+                  quoteResult.serviceChargeAmount.toFixed(2),
 
-                  isFinalQuoteApproved:
-                    false,
+                isFinalQuoteApproved: false,
 
-                  onsiteRepairAuthorized:
-                    false,
+                onsiteRepairAuthorized:
+                  existingItem.onsiteRepairAuthorized,
 
-                  updatedAt: new Date(),
-                })
-                .where(
-                  eq(
-                    jobItems.id,
-                    createdItem.id,
-                  ),
-                )
-                .returning();
+                inlabRepairAuthorized:
+                  existingItem.inlabRepairAuthorized,
+
+                updatedAt: new Date(),
+              })
+              .where(
+                eq(jobItems.id, existingItem.id),
+              )
+              .returning();
 
             return updatedItem;
           },
-
           csUserId,
-
-          itemComment,
-
+          'Final quote generated for item.',
           tx,
         );
       }
 
-      // =========================================================
-      // 11. Calculate JOB quote totals
-      // =========================================================
+      // --------------------------------------------------
+      // 10. Calculate quote totals
+      // --------------------------------------------------
 
       const finalSubtotal =
         Math.round(
@@ -1410,12 +1484,12 @@ export const generateFinalQuote = async (
 
       const finalDiscount =
         Math.round(
-          discount * 100,
+          Number(discount) * 100,
         ) / 100;
 
       const finalTax =
         Math.round(
-          tax * 100,
+          Number(tax) * 100,
         ) / 100;
 
       const totalAmount =
@@ -1428,9 +1502,9 @@ export const generateFinalQuote = async (
           ) * 100,
         ) / 100;
 
-      // =========================================================
-      // 12. Update JOB quote totals
-      // =========================================================
+      // --------------------------------------------------
+      // 11. Update quote totals
+      // --------------------------------------------------
 
       const [updatedQuote] =
         await tx
@@ -1459,31 +1533,34 @@ export const generateFinalQuote = async (
           )
           .returning();
 
-      // =========================================================
-      // 13. Job-level audit comment
-      // =========================================================
+      // --------------------------------------------------
+      // 12. Job-level audit comment
+      //
+      // IMPORTANT:
+      // Job status remains pending_final_quote.
+      // --------------------------------------------------
 
       await tx
         .insert(jobComments)
         .values({
           jobId,
+
+          jobItemId: null,
+
           userId: csUserId,
-          comment: comment.trim(),
+
+          comment: jobComment,
         });
 
-      // =========================================================
-      // IMPORTANT:
-      //
-      // DO NOT transition the job here.
-      //
-      // Job remains:
-      // pending_final_quote_onsite
-      // =========================================================
+      // --------------------------------------------------
+      // 13. Return
+      // --------------------------------------------------
 
       return {
         job: {
           id: job.id,
 
+          // Job DOES NOT change status
           currentStatus:
             job.currentStatus,
         },
