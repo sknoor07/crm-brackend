@@ -65,13 +65,13 @@ router.get(
   searchCustomers,
 );
 
-// final close after talking with customer
+// get jobs waiting to be closed
 router.get(
   '/ready-for-closure',
   requireRole(csRoles),
   getJobsWaitingToBeClosed,
 );
-
+// final close after talking with customer
 router.patch(
   '/close',
   requireRole(csRoles),

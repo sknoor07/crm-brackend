@@ -1028,10 +1028,7 @@ export const completeTransportInspection = async (
 /**
   * FINISH ONSITE REPAIR fo an Item
  */
-export const finishOnsiteRepair = async (
-  req: Request<{}, {}, FinishOnsiteRepairInput>,
-  res: Response,
-) => {
+export const finishOnsiteRepair = async (req: Request<{}, {}, FinishOnsiteRepairInput>,res: Response,) => {
   try {
     const transportPersonId = getUserId(req);
 
@@ -1106,7 +1103,8 @@ export const finishOnsiteRepair = async (
           item.repairLocation ===
           'customer_site' &&
           item.currentStatus ===
-          'transport_visit_in_progress',
+          'transport_visit_in_progress' &&
+          item.onsiteRepairAuthorized===true,
       );
 
     if (onsiteItems.length === 0) {
@@ -1199,8 +1197,6 @@ export const finishOnsiteRepair = async (
 
                         repairFinishedOnsite: true,
 
-                        onsiteRepairAuthorized: true,
-
                         inlabRepairAuthorized: false,
 
                         repairNotes:
@@ -1236,7 +1232,7 @@ export const finishOnsiteRepair = async (
           // Job → repair_completed
           // --------------------------------------------
 
-          const [updatedJob] =
+          const updatedJob =
             await transitionJob({
               jobId: job.id,
 

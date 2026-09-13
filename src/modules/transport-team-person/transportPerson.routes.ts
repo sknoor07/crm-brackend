@@ -79,6 +79,21 @@ router.get(
 router.post('/complete-inspection',requireRole(transportRoles), validateRequest(completeTransportInspectionSchema), completeTransportInspection ,);
 
 
+router.patch(
+  '/finish-repair',
+  requireRole(transportRoles),
+  validateRequest(finishOnsiteRepairInput),
+  finishOnsiteRepair,
+);
+
+
+
+
+
+
+
+
+
 
 ////////////////////////////done////////////////////////
 
@@ -137,12 +152,7 @@ router.post('/complete-inspection',requireRole(transportRoles), validateRequest(
 //   validateRequest(startAndFinishOnsiteRepairSchema),
 //   startOnsiteRepair,
 // );
-router.patch(
-  '/finish-repair',
-  requireRole(transportRoles),
-  validateRequest(finishOnsiteRepairInput),
-  finishOnsiteRepair,
-);
+
 
 // router.patch(
 //   '/complete-repair',

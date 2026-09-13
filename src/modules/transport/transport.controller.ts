@@ -31,10 +31,12 @@ import type {
 
 import type {
   JobItemStatus,
+  JobSummaryStatus,
 } from '../../db/schema/job-status.js';
 import { error } from 'node:console';
 import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
+import { allowedJobTransitions } from '../jobstatusandtransitions/status-history.js';
 
 
 /* =========================================================
@@ -358,6 +360,42 @@ export const getPickUpPersonList = async (req: Request, res: Response) => {
 
 
 
+export const getJobsWaitingLabReceipt = async (req: Request, res:Response)=>{
+  try{
+  const user = req.user;
+  if(!user){
+    res.status(401).json(new Error('Authorised User Not found'));
+  }
+  const rows= await db.select({jobs,items:jobItems}).from(jobs).leftJoin(jobItems,eq(jobItems.jobId,jobs.id)).where(and(eq(jobs.currentStatus,'going_to_lab'),eq(jobItems.currentStatus,"pending_lab_receipt")));
+  
+  const jobMap= new Map<string,{job:typeof rows[number]['jobs']; item:NonNullable<typeof rows[number]['items']>[]}>();
+
+  for(const row of rows){
+    const jobId=row.jobs.id;
+    if(!jobMap.has(jobId)){
+      jobMap.set(jobId,{job:row.jobs,item:[]})
+    }
+    if(row.items){
+      jobMap.get(jobId)?.item.push(row.items)
+    }
+  }
+  const result= Array.from(jobMap.values());''
+  res.status(200).json({result});
+}catch(err){
+  res.status(500).json({error:err, message:"Problem with Getting Jobs on the way to lab"});
+}
+
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -576,90 +614,136 @@ export const receiveAtLab = async (
        Process items in transaction
        ----------------------------------------------------- */
 
-    const result =
-      await db.transaction(async (tx) => {
-        const updatedItems = [];
+    const result = await db.transaction(async (tx) => {
+  // 1. Extract unique Job IDs from the batch items
+  const uniqueJobIds = Array.from(
+    new Set(existingItems.map((item) => item.jobId))
+  );
 
-        for (const item of existingItems) {
-          const updatedItem =
-            await updateJobItemWithStatusTransition(
-              item.id,
-              item.currentStatus as JobItemStatus,
-              'received_at_lab',
-              async (transaction) => {
-                const [updated] =
-                  await transaction
-                    .update(jobItems)
-                    .set({
-                      currentStatus:
-                        'received_at_lab',
+  // 2. Fetch all related jobs inside the transaction
+  const targetJobs = await tx
+    .select()
+    .from(jobs)
+    .where(inArray(jobs.id, uniqueJobIds));
 
-                      onsiteRepairAuthorized:
-                        false,
+  const jobMap = new Map(targetJobs.map((j) => [j.id, j]));
 
-                      inlabRepairAuthorized:
-                        true,
+  // Verify all jobs exist
+  for (const jobId of uniqueJobIds) {
+    if (!jobMap.has(jobId)) {
+      throw new Error(`Job ${jobId} not found for batch processing.`);
+    }
+  }
 
-                      updatedAt:
-                        new Date(),
-                    })
-                    .where(
-                      eq(
-                        jobItems.id,
-                        item.id,
-                      ),
-                    )
-                    .returning();
+  // Track modified jobs
+  const updatedJobsMap = new Map<string, typeof jobs.$inferSelect>();
 
-                return updated;
-              },
-              transportManagerId,
-              comment?.trim() ||
-                'Item received at the lab.',
-              tx,
-            );
+  // 3. Process Job Status Transitions for affected jobs
+  for (const jobId of uniqueJobIds) {
+    const job = jobMap.get(jobId)!;
 
-          updatedItems.push(
-            updatedItem,
-          );
-        }
+    if (job.currentStatus !== 'repair_in_progress') {
+      const updatedJob = await transitionJob({
+        jobId,
+        previousStatus: job.currentStatus,
+        newStatus: 'repair_in_progress',
+        changedBy: req.user?.userId as string,
+        note: comment?.trim() || 'system: Item Received At Lab',
+        updateJob: async (transaction) => {
+          const [updated] = await transaction
+            .update(jobs)
+            .set({
+              currentStatus: 'repair_in_progress',
+              updatedAt: new Date(),
+            })
+            .where(eq(jobs.id, jobId))
+            .returning();
 
-        await tx
-          .insert(jobComments)
-          .values({
-            jobId,
-            jobItemId: null,
-            userId:
-              transportManagerId,
-            comment:
-              comment?.trim() ||
-              (
-                updatedItems.length === 1
-                  ? 'Item received at the lab.'
-                  : 'Items received at the lab.'
-              ),
-          });
-
-        return {
-          job,
-          items: updatedItems,
-        };
+          return updated;
+        },
+        existingTx: tx,
       });
 
-    /* -----------------------------------------------------
-       Response
-       ----------------------------------------------------- */
+      updatedJobsMap.set(jobId, updatedJob);
+    } else {
+      updatedJobsMap.set(jobId, job);
+    }
+  }
 
-    return res.status(200).json({
-      message:
-        result.items.length === 1
-          ? 'Item successfully received at the lab.'
-          : 'Items successfully received at the lab.',
+  // 4. Update all Job Items
+  const updatedItems = [];
 
-      count: result.items.length,
+  for (const item of existingItems) {
+    const updatedItem = await updateJobItemWithStatusTransition(
+      item.id,
+      item.currentStatus as JobItemStatus,
+      'received_at_lab',
+      async (transaction) => {
+        const [updated] = await transaction
+          .update(jobItems)
+          .set({
+            currentStatus: 'received_at_lab',
+            updatedAt: new Date(),
+          })
+          .where(eq(jobItems.id, item.id))
+          .returning();
 
-      data: result,
-    });
+        return updated;
+      },
+      transportManagerId,
+      comment?.trim() || 'Item received at the lab.',
+      tx
+    );
+
+    updatedItems.push(updatedItem);
+  }
+
+  // 5. Create Job-Level Comments for each affected Job
+  // Group processed items by jobId to count items per job
+  const itemsCountByJobId = updatedItems.reduce<Record<string, number>>(
+    (acc, item) => {
+      acc[item.jobId] = (acc[item.jobId] || 0) + 1;
+      return acc;
+    },
+    {}
+  );
+
+  const commentRows = uniqueJobIds.map((jobId) => {
+    const itemCount = itemsCountByJobId[jobId] || 0;
+    const defaultComment =
+      itemCount === 1
+        ? 'Item received at the lab.'
+        : `${itemCount} items received at the lab.`;
+
+    return {
+      jobId,
+      jobItemId: null,
+      userId: transportManagerId,
+      comment: comment?.trim() || defaultComment,
+    };
+  });
+
+  await tx.insert(jobComments).values(commentRows);
+
+  return {
+    jobs: Array.from(updatedJobsMap.values()),
+    items: updatedItems,
+  };
+});
+
+/* -----------------------------------------------------
+   Response
+   ----------------------------------------------------- */
+
+return res.status(200).json({
+  message:
+    result.items.length === 1
+      ? 'Item successfully received at the lab.'
+      : 'Items successfully received at the lab.',
+  count: result.items.length,
+  jobsAffected: result.jobs.length,
+  data: result,
+});
   } catch (error) {
     console.error(
       'Receive item at lab error:',

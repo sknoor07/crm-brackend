@@ -36,8 +36,7 @@ export const allowedJobTransitions: Record<
 
   repair_completed: [
     'closed',
-    'waitng_for_delivery', //lab
-    'delivered',        //onsite
+    'waitng_for_delivery', //lab   
   ],
 
   going_to_lab: [

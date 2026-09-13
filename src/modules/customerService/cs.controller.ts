@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-
+import type { ParamsDictionary } from 'express-serve-static-core';
 import { and, asc, desc, eq, exists, ilike, inArray, notExists, or, sql } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
@@ -50,7 +50,7 @@ export const getJobsWaitingForCSApproval = async (req: Request, res: Response,) 
   }
 };
 
-interface CustomerParams {
+interface CustomerParams extends ParamsDictionary{
   id: string;
 }
 // after search for customer clik on customer so this functions return the customer with profile and all jobs submitted by customer
@@ -234,7 +234,7 @@ export const getJobsWaitingToBeClosed = async (req: Request, res: Response,) => 
     const hasNonFinalItems = db.select({ id: jobItems.id, })
       .from(jobItems)
       .where(and(eq(jobItems.jobId, jobs.id,),
-        sql`${jobItems.currentStatus} NOT IN ('delivered', 'repair_rejected')`,
+        sql`${jobItems.currentStatus} NOT IN ('delivered', 'repair_rejected','cancelled','removed_from_quote')`,
       ));
 
     /**
@@ -264,13 +264,7 @@ export const getJobsWaitingToBeClosed = async (req: Request, res: Response,) => 
       .leftJoin(customerProfiles, eq(customerProfiles.userId, users.id,))
       .leftJoin(jobItems, eq(jobItems.jobId, jobs.id,),)
 
-      .where(and(eq(jobs.currentStatus, 'delivered',),
-        exists(hasItems),
-        /**
-         * No non-final items are allowed.
-         */
-        notExists(hasNonFinalItems),),
-      );
+      .where(and(or(eq(jobs.currentStatus, 'delivered',),eq(jobs.currentStatus,'repair_completed')),exists(hasItems),notExists(hasNonFinalItems)));
 
     /**
      * Group the JOIN result.
@@ -459,11 +453,7 @@ export const closeJobRequest = async (
     // --------------------------------------------------
 
     if (
-      !canTransitionJob(
-        job.currentStatus,
-        'closed',
-      )
-    ) {
+      !canTransitionJob(job.currentStatus,'closed')) {
       return res.status(400).json({
         status: 'error',
         error:
@@ -507,7 +497,9 @@ export const closeJobRequest = async (
     const nonFinalItems = items.filter(
       (item) =>
         item.currentStatus !== 'delivered' &&
-        item.currentStatus !== 'repair_rejected',
+        item.currentStatus !== 'repair_rejected' &&
+        item.currentStatus !== 'removed_from_quote' &&
+        item.currentStatus !== 'cancelled',
     );
 
 
@@ -553,17 +545,7 @@ export const closeJobRequest = async (
             .select()
             .from(jobs)
             .where(
-              and(
-                eq(
-                  jobs.id,
-                  jobId,
-                ),
-
-                eq(
-                  jobs.currentStatus,
-                  'delivered',
-                ),
-              ),
+              and(eq(jobs.id, jobId),or(eq(jobs.currentStatus, 'delivered'),eq(jobs.currentStatus, 'repair_completed')))
             )
             .limit(1);
 
@@ -839,7 +821,7 @@ export const approveJobByCS = async (req: Request<{}, {}, CSApproveJobAndJobItem
     });
   }
 };
-interface JobParams {
+interface JobParams extends ParamsDictionary{
   id: string;
 }
 

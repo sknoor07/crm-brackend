@@ -9,6 +9,7 @@ import {
   getRepairManagers,
   assignRepairManager,
   getPickUpPersonList,
+  getJobsWaitingLabReceipt,
 } from './transport.controller.js';
 
 import {
@@ -61,7 +62,10 @@ router.patch(
 
 
 
-
+router.get(
+  '/get-jobs-with-pending-lab-receipts',
+  getJobsWaitingLabReceipt,
+)
 
 
 
@@ -117,13 +121,13 @@ router.get(
  * Transport Manager assigns the whole job
  * to a delivery person.
  */
-router.patch(
-  '/assign-delivery',
-  validateRequest(
-    assignDeliverySchema,
-  ),
-  assignDelivery,
-);
+// router.patch(
+//   '/assign-delivery',
+//   validateRequest(
+//     assignDeliverySchema,
+//   ),
+//   assignDelivery,
+// );
 
 
 router.get(
