@@ -27,6 +27,7 @@ export const jobs = pgTable('jobs', {
   assignedTransportTeamPersonId: uuid('assigned_transport_team_person_id',).references(() => users.id),
 
   repairManagerId: uuid('repair_manager_id',).references(() => users.id),
+  
 
   assignedDeliveryTechId: uuid('assigned_delivery_tech_id',).references(() => users.id),
 

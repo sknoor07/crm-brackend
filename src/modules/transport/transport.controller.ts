@@ -387,54 +387,6 @@ export const getJobsWaitingLabReceipt = async (req: Request, res:Response)=>{
 
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-///////////////////////done////////////////
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* =========================================================
-   3. RECEIVE ITEM AT LAB
-   ========================================================= */
-
-/**
- * Receive an item at the lab.
- *
- * Transition:
- *
- *     pending_lab_receipt
- *              ↓
- *     received_at_lab
- *
- * This is an ITEM-level transition.
- */
-
 export const receiveAtLab = async (
   req: Request<{}, {}, ReceiveLabInput>,
   res: Response,
@@ -615,118 +567,126 @@ export const receiveAtLab = async (
        ----------------------------------------------------- */
 
     const result = await db.transaction(async (tx) => {
-  // 1. Extract unique Job IDs from the batch items
-  const uniqueJobIds = Array.from(
-    new Set(existingItems.map((item) => item.jobId))
-  );
 
-  // 2. Fetch all related jobs inside the transaction
-  const targetJobs = await tx
-    .select()
-    .from(jobs)
-    .where(inArray(jobs.id, uniqueJobIds));
+  /* -----------------------------------------------------
+     1. Update job
+     ----------------------------------------------------- */
 
-  const jobMap = new Map(targetJobs.map((j) => [j.id, j]));
+  const updatedJob = await transitionJob({
+    jobId: job.id,
+    previousStatus: job.currentStatus,
+    newStatus: 'repair_in_progress',
+    changedBy: transportManagerId,
+    note:
+      comment?.trim() ||
+      'Item received at lab. Repair can proceed.',
 
-  // Verify all jobs exist
-  for (const jobId of uniqueJobIds) {
-    if (!jobMap.has(jobId)) {
-      throw new Error(`Job ${jobId} not found for batch processing.`);
-    }
-  }
+    updateJob: async (transaction) => {
+      const [updated] = await transaction
+        .update(jobs)
+        .set({
+          currentStatus: 'repair_in_progress',
+          updatedAt: new Date(),
+        })
+        .where(eq(jobs.id, job.id))
+        .returning();
 
-  // Track modified jobs
-  const updatedJobsMap = new Map<string, typeof jobs.$inferSelect>();
+      if (!updated) {
+        throw new Error(
+          `Failed to update job ${job.id}`,
+        );
+      }
 
-  // 3. Process Job Status Transitions for affected jobs
-  for (const jobId of uniqueJobIds) {
-    const job = jobMap.get(jobId)!;
+      return updated;
+    },
 
-    if (job.currentStatus !== 'repair_in_progress') {
-      const updatedJob = await transitionJob({
-        jobId,
-        previousStatus: job.currentStatus,
-        newStatus: 'repair_in_progress',
-        changedBy: req.user?.userId as string,
-        note: comment?.trim() || 'system: Item Received At Lab',
-        updateJob: async (transaction) => {
-          const [updated] = await transaction
-            .update(jobs)
-            .set({
-              currentStatus: 'repair_in_progress',
-              updatedAt: new Date(),
-            })
-            .where(eq(jobs.id, jobId))
-            .returning();
+    existingTx: tx,
+  });
+
+
+  /* -----------------------------------------------------
+     2. Update items
+     ----------------------------------------------------- */
+
+  const updatedItems:
+    (typeof jobItems.$inferSelect)[] = [];
+
+  for (const item of existingItems) {
+
+    const updatedItem =
+      await updateJobItemWithStatusTransition(
+        item.id,
+        item.currentStatus as JobItemStatus,
+        'received_at_lab',
+
+        async (transaction) => {
+          const [updated] =
+            await transaction
+              .update(jobItems)
+              .set({
+                currentStatus:
+                  'received_at_lab',
+
+                onsiteRepairAuthorized:
+                  false,
+
+                inlabRepairAuthorized:
+                  true,
+
+                updatedAt:
+                  new Date(),
+              })
+              .where(
+                eq(
+                  jobItems.id,
+                  item.id,
+                ),
+              )
+              .returning();
+
+          if (!updated) {
+            throw new Error(
+              `Failed to update job item ${item.id}`,
+            );
+          }
 
           return updated;
         },
-        existingTx: tx,
-      });
 
-      updatedJobsMap.set(jobId, updatedJob);
-    } else {
-      updatedJobsMap.set(jobId, job);
-    }
-  }
+        transportManagerId,
 
-  // 4. Update all Job Items
-  const updatedItems = [];
+        comment?.trim() ||
+          'Item received at the lab.',
 
-  for (const item of existingItems) {
-    const updatedItem = await updateJobItemWithStatusTransition(
-      item.id,
-      item.currentStatus as JobItemStatus,
-      'received_at_lab',
-      async (transaction) => {
-        const [updated] = await transaction
-          .update(jobItems)
-          .set({
-            currentStatus: 'received_at_lab',
-            updatedAt: new Date(),
-          })
-          .where(eq(jobItems.id, item.id))
-          .returning();
-
-        return updated;
-      },
-      transportManagerId,
-      comment?.trim() || 'Item received at the lab.',
-      tx
-    );
+        tx,
+      );
 
     updatedItems.push(updatedItem);
   }
 
-  // 5. Create Job-Level Comments for each affected Job
-  // Group processed items by jobId to count items per job
-  const itemsCountByJobId = updatedItems.reduce<Record<string, number>>(
-    (acc, item) => {
-      acc[item.jobId] = (acc[item.jobId] || 0) + 1;
-      return acc;
-    },
-    {}
-  );
 
-  const commentRows = uniqueJobIds.map((jobId) => {
-    const itemCount = itemsCountByJobId[jobId] || 0;
-    const defaultComment =
-      itemCount === 1
-        ? 'Item received at the lab.'
-        : `${itemCount} items received at the lab.`;
+  /* -----------------------------------------------------
+     3. Job-level comment
+     ----------------------------------------------------- */
 
-    return {
-      jobId,
+  await tx
+    .insert(jobComments)
+    .values({
+      jobId: job.id,
       jobItemId: null,
       userId: transportManagerId,
-      comment: comment?.trim() || defaultComment,
-    };
-  });
+      comment:
+        comment?.trim() ||
+        (
+          updatedItems.length === 1
+            ? 'Item received at the lab.'
+            : `${updatedItems.length} items received at the lab.`
+        ),
+    });
 
-  await tx.insert(jobComments).values(commentRows);
 
   return {
-    jobs: Array.from(updatedJobsMap.values()),
+    job: updatedJob,
     items: updatedItems,
   };
 });
@@ -741,7 +701,7 @@ return res.status(200).json({
       ? 'Item successfully received at the lab.'
       : 'Items successfully received at the lab.',
   count: result.items.length,
-  jobsAffected: result.jobs.length,
+  jobsAffected: result.items.length,
   data: result,
 });
   } catch (error) {
@@ -756,6 +716,386 @@ return res.status(200).json({
     });
   }
 };
+
+export const getJobsreceivedAtLab= async(req:Request,res:Response)=>{
+  try{
+  const user = req.user;
+  if(!user){
+    res.status(401).json(new Error('Authorised User Not found'));
+  }
+  const rows= await db.select({jobs,items:jobItems}).from(jobs).leftJoin(jobItems,eq(jobItems.jobId,jobs.id)).where(and(eq(jobs.currentStatus,'repair_in_progress'),eq(jobItems.currentStatus,"received_at_lab")));
+  
+  const jobMap= new Map<string,{job:typeof rows[number]['jobs']; item:NonNullable<typeof rows[number]['items']>[]}>();
+
+  for(const row of rows){
+    const jobId=row.jobs.id;
+    if(!jobMap.has(jobId)){
+      jobMap.set(jobId,{job:row.jobs,item:[]})
+    }
+    if(row.items){
+      jobMap.get(jobId)?.item.push(row.items)
+    }
+  }
+  const result= Array.from(jobMap.values());''
+  res.status(200).json({result});
+}catch(err){
+  res.status(500).json({error:err, message:"Problem with Getting Jobs on the way to lab"});
+}
+}
+
+const isActiveRepairManager = async (
+  userId: string,
+): Promise<boolean> => {
+  const [manager] = await db
+    .select({
+      id: users.id,
+    })
+    .from(users)
+    .innerJoin(
+      userRoles,
+      eq(userRoles.userId, users.id),
+    )
+    .innerJoin(
+      roles,
+      eq(userRoles.roleId, roles.id),
+    )
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.userType, 'employee'),
+        eq(users.isActive, true),
+        eq(roles.name, 'repair_manager'),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(manager);
+};
+
+export const getRepairManagers = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const managers = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: employeeProfiles.firstName,
+        lastName: employeeProfiles.lastName,
+        phone: employeeProfiles.phone,
+      })
+      .from(users)
+      .innerJoin(
+        userRoles,
+        eq(userRoles.userId, users.id),
+      )
+      .innerJoin(
+        roles,
+        eq(userRoles.roleId, roles.id),
+      )
+      .leftJoin(
+        employeeProfiles,
+        eq(
+          employeeProfiles.userId,
+          users.id,
+        ),
+      )
+      .where(
+        and(
+          eq(users.userType, 'employee'),
+          eq(users.isActive, true),
+          eq(roles.name, 'repair_manager'),
+        ),
+      )
+      .orderBy(asc(users.email));
+
+    return res.status(200).json({
+      count: managers.length,
+      managers,
+    });
+  } catch (error) {
+    console.error(
+      'Get repair managers error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+export const assignRepairManager = async (req: Request<{},{},AssignRepairManagerInput>,res: Response,) => {
+  try {
+    const {
+      jobId,
+      repairManagerId,
+      comment,
+    } = req.body;
+
+    const transportManagerId =
+      req.user?.userId;
+
+    if (!transportManagerId) {
+      return res.status(401).json({
+        error: 'Authenticated user not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Find job
+       ----------------------------------------------------- */
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error: 'Job not found',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate transport manager authorization
+       ----------------------------------------------------- */
+
+    if (job.transportManagerId !== transportManagerId) {
+      return res.status(403).json({
+        error:
+          'You are not assigned as the transport manager for this job',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate job status
+       ----------------------------------------------------- */
+
+    if (
+      job.currentStatus !== 'going_to_lab' &&
+      job.currentStatus !== 'repair_in_progress'
+    ) {
+      return res.status(400).json({
+        error:
+          `Cannot assign Repair Team Manager when job is ` +
+          `'${job.currentStatus}'.`,
+      });
+    }
+
+    /* -----------------------------------------------------
+       Validate Repair Team Manager
+       ----------------------------------------------------- */
+
+    const repairManagerActive =
+      await isActiveRepairManager(
+        repairManagerId,
+      );
+
+    if (!repairManagerActive) {
+      return res.status(400).json({
+        error:
+          'Assigned user must be an active employee with the repair_manager role.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Find lab items ready for Repair Manager assignment
+       ----------------------------------------------------- */
+
+    const labItems = await db
+      .select()
+      .from(jobItems)
+      .where(
+        and(
+          eq(jobItems.jobId, jobId),
+          eq(
+            jobItems.currentStatus,
+            'received_at_lab',
+          ),
+        ),
+      );
+
+    if (labItems.length === 0) {
+      return res.status(400).json({
+        error:
+          'No job items are currently received at the lab and ready for Repair Team Manager assignment.',
+      });
+    }
+
+    /* -----------------------------------------------------
+       Assign manager + transition items + update job
+       atomically
+       ----------------------------------------------------- */
+
+    const updatedJob =
+      await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(jobs)
+          .set({
+            repairManagerId,
+            updatedAt: new Date(),
+          })
+          .where(eq(jobs.id, jobId))
+          .returning();
+
+        if (!updated) {
+          throw new Error(
+            'Job could not be updated',
+          );
+        }
+
+        /* -----------------------------------------------
+           Move received lab items to
+           assigned_to_repair_manager
+           ----------------------------------------------- */
+
+        for (const item of labItems) {
+          await updateJobItemWithStatusTransition(
+            item.id,
+            item.currentStatus as JobItemStatus,
+            'assigned_to_repair_manager',
+            async (transaction) => {
+              const [updatedItem] =
+                await transaction
+                  .update(jobItems)
+                  .set({
+                    currentStatus:
+                      'assigned_to_repair_manager',
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    eq(jobItems.id, item.id),
+                  )
+                  .returning();
+
+              return updatedItem;
+            },
+            transportManagerId,
+            comment ||
+              'Item assigned to Repair Team Manager',
+            tx,
+          );
+        }
+
+        /* -----------------------------------------------
+           Move job into repair phase
+           ----------------------------------------------- */
+
+        if (job.currentStatus === 'going_to_lab') {
+          await transitionJob({
+            jobId,
+            previousStatus:
+              job.currentStatus,
+            newStatus:
+              'repair_in_progress',
+            changedBy:
+              transportManagerId,
+            note:
+              comment ||
+              'Repair Team Manager assigned and lab repair process started',
+            updateJob: async (transaction) => {
+              const [result] =
+                await transaction
+                  .update(jobs)
+                  .set({
+                    currentStatus:
+                      'repair_in_progress',
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    eq(jobs.id, jobId),
+                  )
+                  .returning();
+
+              return result;
+            },
+            existingTx: tx,
+          });
+        } else if (comment) {
+          /* ---------------------------------------------
+             Job is already in repair_in_progress.
+             Record an assignment comment only when
+             the user supplied one.
+             --------------------------------------------- */
+
+          await tx
+            .insert(jobComments)
+            .values({
+              jobId,
+              userId:
+                transportManagerId,
+              comment,
+            });
+        }
+
+        return updated;
+      });
+
+    return res.status(200).json({
+      message:
+        'Repair Team Manager assigned successfully.',
+      job: updatedJob,
+      assignedItemCount: labItems.length,
+    });
+  } catch (error) {
+    console.error(
+      'Assign repair manager error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error: 'Internal server error',
+    });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+///////////////////////done////////////////
+
+
+
+
+
+
+////////////////working////////////////////
+
+
+
+
+
+
+
+
+
+
+
+/* =========================================================
+   3. RECEIVE ITEM AT LAB
+   ========================================================= */
+
+/**
+ * Receive an item at the lab.
+ *
+ * Transition:
+ *
+ *     pending_lab_receipt
+ *              ↓
+ *     received_at_lab
+ *
+ * This is an ITEM-level transition.
+ */
+
 
 
 
@@ -1061,312 +1401,6 @@ export const assignDelivery = async (
 };
 
 
-const isActiveRepairManager = async (
-  userId: string,
-): Promise<boolean> => {
-  const [manager] = await db
-    .select({
-      id: users.id,
-    })
-    .from(users)
-    .innerJoin(
-      userRoles,
-      eq(userRoles.userId, users.id),
-    )
-    .innerJoin(
-      roles,
-      eq(userRoles.roleId, roles.id),
-    )
-    .where(
-      and(
-        eq(users.id, userId),
-        eq(users.userType, 'employee'),
-        eq(users.isActive, true),
-        eq(roles.name, 'repair_manager'),
-      ),
-    )
-    .limit(1);
-
-  return Boolean(manager);
-};
-
-export const getRepairManagers = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const managers = await db
-      .select({
-        id: users.id,
-        email: users.email,
-        firstName: employeeProfiles.firstName,
-        lastName: employeeProfiles.lastName,
-        phone: employeeProfiles.phone,
-      })
-      .from(users)
-      .innerJoin(
-        userRoles,
-        eq(userRoles.userId, users.id),
-      )
-      .innerJoin(
-        roles,
-        eq(userRoles.roleId, roles.id),
-      )
-      .leftJoin(
-        employeeProfiles,
-        eq(
-          employeeProfiles.userId,
-          users.id,
-        ),
-      )
-      .where(
-        and(
-          eq(users.userType, 'employee'),
-          eq(users.isActive, true),
-          eq(roles.name, 'repair_manager'),
-        ),
-      )
-      .orderBy(asc(users.email));
-
-    return res.status(200).json({
-      count: managers.length,
-      managers,
-    });
-  } catch (error) {
-    console.error(
-      'Get repair managers error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
 
 
-export const assignRepairManager = async (req: Request<{},{},AssignRepairManagerInput>,res: Response,) => {
-  try {
-    const {
-      jobId,
-      repairManagerId,
-      comment,
-    } = req.body;
 
-    const transportManagerId =
-      req.user?.userId;
-
-    if (!transportManagerId) {
-      return res.status(401).json({
-        error: 'Authenticated user not found',
-      });
-    }
-
-    /* -----------------------------------------------------
-       Find job
-       ----------------------------------------------------- */
-
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(eq(jobs.id, jobId))
-      .limit(1);
-
-    if (!job) {
-      return res.status(404).json({
-        error: 'Job not found',
-      });
-    }
-
-    /* -----------------------------------------------------
-       Validate transport manager authorization
-       ----------------------------------------------------- */
-
-    if (job.transportManagerId !== transportManagerId) {
-      return res.status(403).json({
-        error:
-          'You are not assigned as the transport manager for this job',
-      });
-    }
-
-    /* -----------------------------------------------------
-       Validate job status
-       ----------------------------------------------------- */
-
-    if (
-      job.currentStatus !== 'going_to_lab' &&
-      job.currentStatus !== 'repair_in_progress'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot assign Repair Team Manager when job is ` +
-          `'${job.currentStatus}'.`,
-      });
-    }
-
-    /* -----------------------------------------------------
-       Validate Repair Team Manager
-       ----------------------------------------------------- */
-
-    const repairManagerActive =
-      await isActiveRepairManager(
-        repairManagerId,
-      );
-
-    if (!repairManagerActive) {
-      return res.status(400).json({
-        error:
-          'Assigned user must be an active employee with the repair_manager role.',
-      });
-    }
-
-    /* -----------------------------------------------------
-       Find lab items ready for Repair Manager assignment
-       ----------------------------------------------------- */
-
-    const labItems = await db
-      .select()
-      .from(jobItems)
-      .where(
-        and(
-          eq(jobItems.jobId, jobId),
-          eq(
-            jobItems.currentStatus,
-            'received_at_lab',
-          ),
-        ),
-      );
-
-    if (labItems.length === 0) {
-      return res.status(400).json({
-        error:
-          'No job items are currently received at the lab and ready for Repair Team Manager assignment.',
-      });
-    }
-
-    /* -----------------------------------------------------
-       Assign manager + transition items + update job
-       atomically
-       ----------------------------------------------------- */
-
-    const updatedJob =
-      await db.transaction(async (tx) => {
-        const [updated] = await tx
-          .update(jobs)
-          .set({
-            repairManagerId,
-            updatedAt: new Date(),
-          })
-          .where(eq(jobs.id, jobId))
-          .returning();
-
-        if (!updated) {
-          throw new Error(
-            'Job could not be updated',
-          );
-        }
-
-        /* -----------------------------------------------
-           Move received lab items to
-           assigned_to_repair_manager
-           ----------------------------------------------- */
-
-        for (const item of labItems) {
-          await updateJobItemWithStatusTransition(
-            item.id,
-            item.currentStatus as JobItemStatus,
-            'assigned_to_repair_manager',
-            async (transaction) => {
-              const [updatedItem] =
-                await transaction
-                  .update(jobItems)
-                  .set({
-                    currentStatus:
-                      'assigned_to_repair_manager',
-                    updatedAt: new Date(),
-                  })
-                  .where(
-                    eq(jobItems.id, item.id),
-                  )
-                  .returning();
-
-              return updatedItem;
-            },
-            transportManagerId,
-            comment ||
-              'Item assigned to Repair Team Manager',
-            tx,
-          );
-        }
-
-        /* -----------------------------------------------
-           Move job into repair phase
-           ----------------------------------------------- */
-
-        if (job.currentStatus === 'going_to_lab') {
-          await transitionJob({
-            jobId,
-            previousStatus:
-              job.currentStatus,
-            newStatus:
-              'repair_in_progress',
-            changedBy:
-              transportManagerId,
-            note:
-              comment ||
-              'Repair Team Manager assigned and lab repair process started',
-            updateJob: async (transaction) => {
-              const [result] =
-                await transaction
-                  .update(jobs)
-                  .set({
-                    currentStatus:
-                      'repair_in_progress',
-                    updatedAt: new Date(),
-                  })
-                  .where(
-                    eq(jobs.id, jobId),
-                  )
-                  .returning();
-
-              return result;
-            },
-            existingTx: tx,
-          });
-        } else if (comment) {
-          /* ---------------------------------------------
-             Job is already in repair_in_progress.
-             Record an assignment comment only when
-             the user supplied one.
-             --------------------------------------------- */
-
-          await tx
-            .insert(jobComments)
-            .values({
-              jobId,
-              userId:
-                transportManagerId,
-              comment,
-            });
-        }
-
-        return updated;
-      });
-
-    return res.status(200).json({
-      message:
-        'Repair Team Manager assigned successfully.',
-      job: updatedJob,
-      assignedItemCount: labItems.length,
-    });
-  } catch (error) {
-    console.error(
-      'Assign repair manager error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};

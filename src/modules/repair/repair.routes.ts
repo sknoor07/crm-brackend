@@ -13,6 +13,7 @@ import {
   getPendingRepairInspections,
   approveRepair,
   rejectRepairInspection,
+  getAllRepairPersons,
 } from './repair.controller.js';
 
 import {
@@ -65,6 +66,7 @@ router.get(
   getPendingRepairAssignments,
 );
 
+router.get('/get-repair-persons',requireRole(repairManagerRoles),getAllRepairPersons);
 
 /**
  * Assign an individual item to a Repair Person.
@@ -79,6 +81,16 @@ router.patch(
   ),
   assignRepairPerson,
 );
+
+///////////////////////////////////////////////done///////////////////////////////////////
+
+
+
+
+
+
+
+/////////////////////////////////////////Pending/////////////////////////////////////////
 
 
 /**
@@ -147,6 +159,17 @@ router.get(
   requireRole(repairPersonRoles),
   getAssignedRepairItems,
 );
+
+
+
+
+
+///////////////////////////////////////////////////////////done /////////////////////////////////////////////////////
+
+
+
+
+/////////////////////////////////////////////////////pending////////////////////////////////////////////////////
 
 
 /**

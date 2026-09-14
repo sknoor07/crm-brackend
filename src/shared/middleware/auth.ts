@@ -53,7 +53,9 @@ export const requireRole = (allowedRoles: string[]) => {
     }
 
     // Check if the user has at least one of the allowed roles
-    const hasPermission = req.user.roles.some((role) => {return allowedRoles.includes(role)});
+    const hasPermission = req.user.roles.some((role) => {
+      return allowedRoles.includes(role)
+    });
 
     if (!hasPermission) {
       return res.status(403).json({ 

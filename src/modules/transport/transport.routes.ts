@@ -10,6 +10,7 @@ import {
   assignRepairManager,
   getPickUpPersonList,
   getJobsWaitingLabReceipt,
+  getJobsreceivedAtLab,
 } from './transport.controller.js';
 
 import {
@@ -67,24 +68,27 @@ router.get(
   getJobsWaitingLabReceipt,
 )
 
-
-
-
-
-
-
-///////////////////////done/////////////////////////////////////
-
-
 /**
  * Transport Manager receives an individual
  * item at the lab.
  */
+
 router.patch(
   '/receive-lab',
   validateRequest(receiveLabSchema),
   receiveAtLab,
 );
+
+router.get(
+  '/get-receive-At-lab',
+  getJobsreceivedAtLab
+)
+
+
+///////////////////////done/////////////////////////////////////
+
+
+
 
 
 

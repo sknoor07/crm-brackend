@@ -45,64 +45,58 @@ const csRoles = [
 ];
 
 
-router.get(
-  '/pending-approval',
+router.get('/pending-approval',
   requireRole(csRoles),
   getJobsWaitingForCSApproval,
 );
 
-router.get(
-  "/getCustomerDetails/:id",
+router.get("/getCustomerDetails/:id",
   requireRole(csRoles),
   validateRequest(csGetCustomerDetail, "params"),
   seacrhCustomerDetailswithJob,
 );
 
-router.get(
-  '/search',
+router.get('/search',
   requireRole(csRoles),
   validateRequest(searchCustomerSchema, 'query'),
   searchCustomers,
 );
 
 // get jobs waiting to be closed
-router.get(
-  '/ready-for-closure',
+router.get('/ready-for-closure',
   requireRole(csRoles),
   getJobsWaitingToBeClosed,
 );
 // final close after talking with customer
-router.patch(
-  '/close',
+router.patch('/close',
   requireRole(csRoles),
   validateRequest(closeJobSchema),
   closeJobRequest,
 );
 
 
-router.patch(
-  '/submit-job',
+router.patch('/submit-job',
   requireRole(csRoles),
-  validateRequest(
-    csApproveJobAndJobItemSchema,
-  ),
+  validateRequest(csApproveJobAndJobItemSchema,),
   approveJobByCS,
 );
 
-router.get(
-  '/getjobdetails/:id',
+router.get('/getjobdetails/:id',
   requireRole(csRoles),
   getjobDetails,
 )
 
 
-router.get(
-  '/pending-final-quotes',
+router.get('/pending-final-quotes',
   requireRole(csRoles),
   getPendingFinalQuotes,
 );
 
-
+router.patch('/final-quote',
+  requireRole(csRoles),
+  validateRequest(generateFinalQuoteSchema,),
+  generateFinalQuote,
+);
 
 
 
@@ -117,14 +111,7 @@ router.get(
 
 
 
-router.patch(
-  '/final-quote',
-  requireRole(csRoles),
-  validateRequest(
-    generateFinalQuoteSchema,
-  ),
-  generateFinalQuote,
-);
+
 
 
 

@@ -91,3 +91,9 @@ export type AssignRepairManagerInput =
   z.infer<typeof assignRepairManagerSchema>;
 
   
+
+
+  export const assignRepairManager =z.object({
+    jobId:z.string().uuid("Invalid Job Id format"),
+    
+  })

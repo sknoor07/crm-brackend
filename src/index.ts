@@ -39,7 +39,6 @@ app.use('/api/v1/transport', transportRoutes);
 app.use('/api/v1/technician', technicianRoutes);
 app.use('/api/v1/customer', customerRoutes);
 app.use('/api/v1/comments',commentRoutes);
-
 app.use('/api/v1/repair', repairRoutes);
 
 app.get('/api/health', (req: Request, res: Response) => {

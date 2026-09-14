@@ -25,6 +25,7 @@ import {
   CompleteRepairInput,
   ApproveRepairInput,
   RejectRepairInspectionInput,
+  CompleteInspection,
 } from './repair.validation.js';
 import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
 
@@ -169,11 +170,7 @@ const getJobItemWithJob = async (
  *            ↓
  *       assignment
  */
-export const getPendingRepairAssignments =
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+export const getPendingRepairAssignments =async (req: Request,res: Response,) => {
     try {
       const managerId =
         req.user?.userId;
@@ -185,36 +182,20 @@ export const getPendingRepairAssignments =
         });
       }
 
-      const isAdmin =
-        req.user?.roles?.includes('admin');
+      const ismanager =
+        req.user?.roles?.includes('repair_manager');
 
       const items = await db
         .select({
-          item: jobItems,
           job: jobs,
+          item: jobItems,
         })
         .from(jobItems)
         .innerJoin(
           jobs,
           eq(jobItems.jobId, jobs.id),
         )
-        .where(
-          isAdmin
-            ? eq(
-                jobItems.currentStatus,
-                'pending_repair_assignment',
-              )
-            : and(
-                eq(
-                  jobItems.currentStatus,
-                  'pending_repair_assignment',
-                ),
-                eq(
-                  jobs.repairManagerId,
-                  managerId,
-                ),
-              ),
-        )
+        .where(and(eq(jobItems.currentStatus,'assigned_to_repair_manager'),eq(jobs.repairManagerId,managerId)))
         .orderBy(
           desc(jobItems.updatedAt),
         );
@@ -235,6 +216,24 @@ export const getPendingRepairAssignments =
     }
   };
 
+
+
+export const getAllRepairPersons= async(req:Request,res:Response)=>{
+  try{
+    const reapirPersons= await db.select({users}).from(users).innerJoin(userRoles,eq(userRoles.userId,users.id)).innerJoin(roles,eq(userRoles.roleId,roles.id)).where(eq(roles.name,'repair_person'));
+    res.status(200).json({"Repair Persons":reapirPersons});
+  }catch(err){
+    console.log(err);
+    res.status(500).json({message:"can't get repair persons"})
+  }
+}
+
+
+
+
+
+
+
 /**
  * Assign an individual repair item to
  * a Repair Person.
@@ -246,14 +245,7 @@ export const getPendingRepairAssignments =
  * assigned_to_repair_person
  */
 
-export const assignRepairPerson = async (
-  req: Request<
-    {},
-    {},
-    AssignRepairPersonInput
-  >,
-  res: Response,
-) => {
+export const assignRepairPerson = async (req: Request<{},{},AssignRepairPersonInput>,res: Response,) => {
   try {
     const {
       jobItemId,
@@ -353,6 +345,7 @@ export const assignRepairPerson = async (
             .set({
               assignedRepairPersonId:
                 repairPersonId,
+              currentStatus: 'assigned_to_repair_person',
 
               updatedAt:
                 new Date(),
@@ -392,6 +385,42 @@ export const assignRepairPerson = async (
 
 
 
+
+
+
+
+
+
+
+
+
+
+  ////////////////////////////////////////////done/////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/////////////////////////////////////////////////Pending//////////////////////////////////////////////////////////
+
+
+
 /*
  * ============================================================
  * REPAIR PERSON
@@ -406,11 +435,7 @@ export const assignRepairPerson = async (
  * Initially this returns items that have not
  * yet started diagnosis.
  */
-export const getAssignedRepairItems =
-  async (
-    req: Request,
-    res: Response,
-  ) => {
+export const getAssignedRepairItems =async (req: Request,res: Response,) => {
     try {
       const userId =
         req.user?.userId;
@@ -425,7 +450,6 @@ export const getAssignedRepairItems =
       const items = await db
         .select({
           item: jobItems,
-          job: jobs,
         })
         .from(jobItems)
         .innerJoin(
@@ -465,6 +489,564 @@ export const getAssignedRepairItems =
   };
 
 
+
+
+  ////////////////////////////////////////////////////////////////done ///////////////////////////////////////////////////////
+
+
+
+  export const requestFinalQuote = async (
+    req: Request<{}, {}, CompleteInspection>,
+    res: Response,
+  ) => {
+    try {
+      const reapirPersonId = req.user?.userId;
+
+      const {
+        jobItemId,
+        comment,
+      } = req.body;
+
+      if(!reapirPersonId){
+        res.status(404).json({message:"Repair Person Id Not Found"});
+      }
+
+      const [existingItems] = await db
+        .select()
+        .from(jobItems)
+        .where(
+          and(eq(jobItems.jobId, jobItemId),eq(jobItems.assignedRepairPersonId,reapirPersonId))
+        ).limit(1);
+
+      if (!existingItems) {
+        return res.status(400).json({
+          error:
+            'This job has no items to inspect.',
+        });
+      }
+
+      // --------------------------------------------------
+      // Find job
+      // --------------------------------------------------
+
+      const [job] = await db
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.id, existingItems.jobId),
+          ),
+        )
+        .limit(1);
+
+      if (!job) {
+        return res.status(404).json({
+          error:
+            'Job not found or not assigned to you.',
+        });
+      }
+
+      // --------------------------------------------------
+      // Job must be waiting for transport visit
+      // --------------------------------------------------
+
+      if (job.currentStatus !== 'repair_in_progress') {
+        return res.status(400).json({
+          error:
+            `In Lab inspection cannot be completed when ` +
+            `job status is ${job.currentStatus}.`,
+        });
+      }
+
+      // --------------------------------------------------
+      // Load all job items
+      // --------------------------------------------------
+
+      
+
+      // --------------------------------------------------
+      // Items that actually require inspection
+      // --------------------------------------------------
+
+      const inspectableItems =
+        existingItems.filter(
+          (item) =>
+            item.currentStatus ===
+            'transport_visit_in_progress',
+        );
+
+      if (inspectableItems.length === 0) {
+        return res.status(400).json({
+          error:
+            'There are no job items pending transport inspection.',
+        });
+      }
+
+      // --------------------------------------------------
+      // Validate submitted item IDs
+      // --------------------------------------------------
+
+      const submittedItemIds = items.map(
+        (item) => item.jobItemId,
+      );
+
+      const uniqueSubmittedItemIds =
+        new Set(submittedItemIds);
+
+      if (
+        uniqueSubmittedItemIds.size !==
+        submittedItemIds.length
+      ) {
+        return res.status(400).json({
+          error:
+            'Duplicate job item IDs are not allowed.',
+        });
+      }
+
+      if (
+        submittedItemIds.length !==
+        inspectableItems.length
+      ) {
+        return res.status(400).json({
+          error:
+            'Inspection result must be submitted for every job item pending inspection.',
+        });
+      }
+
+      const inspectableItemIds =
+        new Set(
+          inspectableItems.map(
+            (item) => item.id,
+          ),
+        );
+
+      const invalidItemId =
+        submittedItemIds.find(
+          (itemId) =>
+            !inspectableItemIds.has(itemId),
+        );
+
+      if (invalidItemId) {
+        return res.status(400).json({
+          error:
+            `Job item ${invalidItemId} is not ready for transport inspection.`,
+        });
+      }
+
+      // --------------------------------------------------
+      // Map submitted inspections
+      // --------------------------------------------------
+
+      const inspectionByItemId =
+        new Map(
+          items.map((item) => [
+            item.jobItemId,
+            item,
+          ]),
+        );
+
+      // --------------------------------------------------
+      // Validate decisions and determine item outcomes
+      // --------------------------------------------------
+
+      const finalItemOutcomes =
+        inspectableItems.map(
+          (existingItem) => {
+            const inspection =
+              inspectionByItemId.get(
+                existingItem.id,
+              );
+
+            if (!inspection) {
+              throw new Error(
+                `Missing inspection for job item ${existingItem.id}.`,
+              );
+            }
+
+            if (
+              inspection.decision ===
+              'onsite'
+            ) {
+              return {
+                jobItemId:
+                  existingItem.id,
+
+                decision:
+                  'onsite' as const,
+
+                finalStatus:
+                  'pending_final_quote' as const,
+              };
+            }
+
+            if (
+              inspection.decision ===
+              'lab'
+            ) {
+              return {
+                jobItemId:
+                  existingItem.id,
+
+                decision:
+                  'lab' as const,
+
+                finalStatus:
+                  'pending_lab_receipt' as const,
+              };
+            }
+
+            if (
+              inspection.decision ===
+              'reject'
+            ) {
+              return {
+                jobItemId:
+                  existingItem.id,
+
+                decision:
+                  'reject' as const,
+
+                finalStatus:
+                  'repair_rejected' as const,
+              };
+            }
+
+            throw new Error(
+              `Invalid inspection decision for job item ${existingItem.id}.`,
+            );
+          },
+        );
+
+      // --------------------------------------------------
+      // Determine overall job route
+      // --------------------------------------------------
+
+      const hasLabItem =
+        finalItemOutcomes.some(
+          (item) =>
+            item.decision === 'lab',
+        );
+
+      const hasOnsiteItem =
+        finalItemOutcomes.some(
+          (item) =>
+            item.decision === 'onsite',
+        );
+
+      const hasRepairableItem =
+        hasLabItem ||
+        hasOnsiteItem;
+
+      /*
+      * ------------------------------------------------
+      * IMPORTANT JOB ROUTING
+      * ------------------------------------------------
+      *
+      * All onsite:
+      *
+      *   pending_visit
+      *        ↓
+      *   pending_final_quote
+      *
+      * Mixed / lab:
+      *
+      *   pending_visit
+      *        ↓
+      *   going_to_lab
+      *
+      * Rejected items do not require repair.
+      */
+
+      let newJobStatus:
+        | 'pending_final_quote'
+        | 'going_to_lab';
+
+      if (hasLabItem) {
+        newJobStatus =
+          'going_to_lab';
+      } else {
+        newJobStatus =
+          'pending_final_quote';
+      }
+
+      const jobNote =
+        comment?.trim() ||
+        (
+          hasLabItem
+            ? hasOnsiteItem
+              ? 'Transport inspection completed. Some items require lab repair.'
+              : 'Transport inspection completed. Items require lab repair.'
+            : hasRepairableItem
+              ? 'Transport inspection completed. All repairable items can be repaired onsite.'
+              : 'Transport inspection completed. All items were rejected for repair.'
+        );
+
+      // --------------------------------------------------
+      // Transaction
+      // --------------------------------------------------
+
+      const result =
+        await db.transaction(
+          async (tx) => {
+
+            // --------------------------------------------
+            // Update JOB status
+            // --------------------------------------------
+
+            await transitionJob({
+              jobId,
+
+              previousStatus:
+                job.currentStatus,
+
+              newStatus:
+                newJobStatus,
+
+              changedBy:
+                transportPersonId,
+
+              note:
+                jobNote,
+
+              updateJob:
+                async (
+                  transaction,
+                ) => {
+                  const [updatedJob] =
+                    await transaction
+                      .update(jobs)
+                      .set({
+                        currentStatus:
+                          newJobStatus,
+
+                        updatedAt:
+                          new Date(),
+                      })
+                      .where(
+                        eq(
+                          jobs.id,
+                          jobId,
+                        ),
+                      )
+                      .returning();
+
+                  return updatedJob;
+                },
+
+              existingTx: tx,
+            });
+
+            // --------------------------------------------
+            // Update ITEMS
+            // --------------------------------------------
+
+            const updatedItems = [];
+
+            for (
+              const inspection of items
+            ) {
+              const existingItem =
+                inspectableItems.find(
+                  (item) =>
+                    item.id ===
+                    inspection.jobItemId,
+                );
+
+              if (!existingItem) {
+                throw new Error(
+                  `Job item ${inspection.jobItemId} not found.`,
+                );
+              }
+
+              let newStatus:
+                | 'pending_final_quote'
+                | 'pending_lab_receipt'
+                | 'repair_rejected';
+
+              if (
+                inspection.decision ===
+                'onsite'
+              ) {
+                newStatus =
+                  'pending_final_quote';
+              } else if (
+                inspection.decision ===
+                'lab'
+              ) {
+                newStatus =
+                  'pending_lab_receipt';
+              } else {
+                newStatus =
+                  'repair_rejected';
+              }
+
+              const itemNote =
+                inspection.comment?.trim() ||
+                (
+                  inspection.decision ===
+                    'onsite'
+                    ? 'Transport inspection completed. Item can be repaired onsite.'
+                    : inspection.decision ===
+                      'lab'
+                      ? 'Transport inspection completed. Item requires lab repair.'
+                      : 'Transport inspection completed. Item rejected for repair.'
+                );
+
+              const updatedItem =
+                await updateJobItemWithStatusTransition(
+                  existingItem.id,
+
+                  existingItem.currentStatus,
+
+                  newStatus,
+
+                  async (
+                    transaction,
+                  ) => {
+
+                    const updateData: {
+                      currentStatus:
+                      | 'pending_final_quote'
+                      | 'pending_lab_receipt'
+                      | 'repair_rejected';
+
+                      repairLocation?:
+                      | 'customer_site'
+                      | 'inlab';
+
+                      onsiteRepairAuthorized?: boolean;
+
+                      inlabRepairAuthorized?: boolean;
+
+                      repairFinishedOnsite?: boolean;
+
+                      updatedAt: Date;
+                    } = {
+                      currentStatus: newStatus,
+                      updatedAt: new Date(),
+                    };
+
+                    // --------------------------------
+                    // Onsite
+                    // --------------------------------
+
+                    if (inspection.decision === 'onsite') {
+                      updateData.repairLocation = 'customer_site';
+
+                      updateData.onsiteRepairAuthorized = true;
+
+                      updateData.inlabRepairAuthorized = false;
+
+                      updateData.repairFinishedOnsite = false;
+                    }
+
+                    // --------------------------------
+                    // Lab
+                    // --------------------------------
+
+                    if (inspection.decision === 'lab') {
+                      updateData.repairLocation = 'inlab';
+
+                      updateData.onsiteRepairAuthorized = false;
+
+                      updateData.inlabRepairAuthorized = true;
+
+                      updateData.repairFinishedOnsite = false;
+                    }
+
+                    // --------------------------------
+                    // Rejected
+                    // --------------------------------
+
+                    if (inspection.decision === 'reject') {
+                      updateData.onsiteRepairAuthorized = false;
+
+                      updateData.inlabRepairAuthorized = false;
+
+                      updateData.repairFinishedOnsite = false;
+                    }
+
+                    const [updated] =
+                      await transaction
+                        .update(jobItems)
+                        .set(
+                          updateData,
+                        )
+                        .where(
+                          eq(
+                            jobItems.id,
+                            existingItem.id,
+                          ),
+                        )
+                        .returning();
+
+                    return updated;
+                  },
+
+                  transportPersonId,
+
+                  itemNote,
+
+                  tx,
+                );
+
+              updatedItems.push(
+                updatedItem,
+              );
+            }
+
+            // --------------------------------------------
+            // Get final job
+            // --------------------------------------------
+
+            const [updatedJob] =
+              await tx
+                .select()
+                .from(jobs)
+                .where(
+                  eq(
+                    jobs.id,
+                    jobId,
+                  ),
+                )
+                .limit(1);
+
+            return {
+              job: updatedJob,
+              items: updatedItems,
+            };
+          },
+        );
+
+      return res.status(200).json({
+        message:
+          'Transport inspection completed successfully.',
+
+        data: result,
+      });
+
+    } catch (error) {
+
+      console.error(
+        'Complete transport inspection error:',
+        error,
+      );
+
+      return res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Internal server error',
+      });
+    }
+  };
+
+
+
+
+
+  /////////////////////////////////////////////////////pending/////////////////////////////////////////////////////////////
+
 /**
  * Start diagnosis.
  *
@@ -472,14 +1054,7 @@ export const getAssignedRepairItems =
  *            ↓
  * diagnosis_in_progress
  */
-export const startDiagnosis = async (
-  req: Request<
-    {},
-    {},
-    StartDiagnosisInput
-  >,
-  res: Response,
-) => {
+export const startDiagnosis = async (req: Request<{},{},StartDiagnosisInput>,res: Response,) => {
   try {
     const {
       jobItemId,
@@ -596,259 +1171,252 @@ export const startDiagnosis = async (
  */
 
 
-export const requestFinalQuote = async (
-  req: Request<
-    {},
-    {},
-    RequestFinalQuoteInput
-  >,
-  res: Response,
-) => {
-  try {
-    const {
-      jobItemId,
-      requestedComponents,
-      diagnosisNotes,
-      comment,
-    } = req.body;
+// export const requestFinalQuote = async (req: Request<{},{},RequestFinalQuoteInput>,res: Response,) => {
+//   try {
+//     const {
+//       jobItemId,
+//       requestedComponents,
+//       diagnosisNotes,
+//       comment,
+//     } = req.body;
 
-    const userId =
-      req.user?.userId;
+//     const userId =
+//       req.user?.userId;
 
-    if (!userId) {
-      return res.status(401).json({
-        error:
-          'Authenticated user not found',
-      });
-    }
+//     if (!userId) {
+//       return res.status(401).json({
+//         error:
+//           'Authenticated user not found',
+//       });
+//     }
 
-    const result =
-      await getJobItemWithJob(jobItemId);
+//     const result =
+//       await getJobItemWithJob(jobItemId);
 
-    if (!result) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
+//     if (!result) {
+//       return res.status(404).json({
+//         error: 'Job item not found',
+//       });
+//     }
 
-    const {
-      item,
-      job,
-    } = result;
+//     const {
+//       item,
+//       job,
+//     } = result;
 
-    /* -----------------------------------------------------
-       Verify Repair Person authorization
-       ----------------------------------------------------- */
+//     /* -----------------------------------------------------
+//        Verify Repair Person authorization
+//        ----------------------------------------------------- */
 
-    if (
-      !isRepairPersonAuthorized(
-        item,
-        userId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error:
-          'You are not authorized to diagnose this repair item.',
-      });
-    }
+//     if (
+//       !isRepairPersonAuthorized(
+//         item,
+//         userId,
+//         req.user?.roles,
+//       )
+//     ) {
+//       return res.status(403).json({
+//         error:
+//           'You are not authorized to diagnose this repair item.',
+//       });
+//     }
 
-    /* -----------------------------------------------------
-       Validate current item status
-       ----------------------------------------------------- */
+//     /* -----------------------------------------------------
+//        Validate current item status
+//        ----------------------------------------------------- */
 
-    if (
-      item.currentStatus !==
-      'assigned_to_repair_person'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot complete diagnosis from ` +
-          `'${item.currentStatus}'. ` +
-          `Item must be 'assigned_to_repair_person'.`,
-      });
-    }
+//     if (
+//       item.currentStatus !==
+//       'assigned_to_repair_person'
+//     ) {
+//       return res.status(400).json({
+//         error:
+//           `Cannot complete diagnosis from ` +
+//           `'${item.currentStatus}'. ` +
+//           `Item must be 'assigned_to_repair_person'.`,
+//       });
+//     }
 
-    /* -----------------------------------------------------
-       Complete diagnosis and check job aggregate state
-       atomically
-       ----------------------------------------------------- */
+//     /* -----------------------------------------------------
+//        Complete diagnosis and check job aggregate state
+//        atomically
+//        ----------------------------------------------------- */
 
-    const updatedItem =
-      await db.transaction(async (tx) => {
-        /*
-         * Move this item:
-         *
-         * assigned_to_repair_person
-         *             ↓
-         * pending_final_quote
-         */
-        const updated =
-          await updateJobItemWithStatusTransition(
-            item.id,
+//     const updatedItem =
+//       await db.transaction(async (tx) => {
+//         /*
+//          * Move this item:
+//          *
+//          * assigned_to_repair_person
+//          *             ↓
+//          * pending_final_quote
+//          */
+//         const updated =
+//           await updateJobItemWithStatusTransition(
+//             item.id,
 
-            item.currentStatus,
+//             item.currentStatus,
 
-            'pending_final_quote',
+//             'pending_final_quote',
 
-            async (transaction) => {
-              const [updatedItem] =
-                await transaction
-                  .update(jobItems)
-                  .set({
-                    requestedComponents:
-                      requestedComponents || null,
+//             async (transaction) => {
+//               const [updatedItem] =
+//                 await transaction
+//                   .update(jobItems)
+//                   .set({
+//                     requestedComponents:
+//                       requestedComponents || null,
 
-                    diagnosisNotes:
-                      diagnosisNotes || null,
+//                     diagnosisNotes:
+//                       diagnosisNotes || null,
 
-                    updatedAt:
-                      new Date(),
-                  })
-                  .where(
-                    eq(
-                      jobItems.id,
-                      item.id,
-                    ),
-                  )
-                  .returning();
+//                     updatedAt:
+//                       new Date(),
+//                   })
+//                   .where(
+//                     eq(
+//                       jobItems.id,
+//                       item.id,
+//                     ),
+//                   )
+//                   .returning();
 
-              return updatedItem;
-            },
+//               return updatedItem;
+//             },
 
-            userId,
+//             userId,
 
-            comment?.trim() ||
-              'Diagnosis completed. Item sent for final quotation.',
+//             comment?.trim() ||
+//               'Diagnosis completed. Item sent for final quotation.',
 
-            tx,
-          );
+//             tx,
+//           );
 
-        /* -------------------------------------------------
-           Check ALL job items after this transition
-           ------------------------------------------------- */
+//         /* -------------------------------------------------
+//            Check ALL job items after this transition
+//            ------------------------------------------------- */
 
-        const allJobItems = await tx
-          .select()
-          .from(jobItems)
-          .where(
-            eq(
-              jobItems.jobId,
-              job.id,
-            ),
-          );
+//         const allJobItems = await tx
+//           .select()
+//           .from(jobItems)
+//           .where(
+//             eq(
+//               jobItems.jobId,
+//               job.id,
+//             ),
+//           );
 
-        /*
-         * These items do not participate in the
-         * final quote readiness check.
-         *
-         * repair_rejected:
-         *   Permanently rejected and not part of quote.
-         *
-         * cancelled:
-         *   No longer active.
-         *
-         * removed_from_quote:
-         *   Explicitly removed by CS.
-         */
-        const applicableItems =
-          allJobItems.filter(
-            (jobItem) =>
-              jobItem.currentStatus !==
-                'repair_rejected' &&
-              jobItem.currentStatus !==
-                'cancelled' &&
-              jobItem.currentStatus !==
-                'removed_from_quote',
-          );
+//         /*
+//          * These items do not participate in the
+//          * final quote readiness check.
+//          *
+//          * repair_rejected:
+//          *   Permanently rejected and not part of quote.
+//          *
+//          * cancelled:
+//          *   No longer active.
+//          *
+//          * removed_from_quote:
+//          *   Explicitly removed by CS.
+//          */
+//         const applicableItems =
+//           allJobItems.filter(
+//             (jobItem) =>
+//               jobItem.currentStatus !==
+//                 'repair_rejected' &&
+//               jobItem.currentStatus !==
+//                 'cancelled' &&
+//               jobItem.currentStatus !==
+//                 'removed_from_quote',
+//           );
 
-        /*
-         * The job is ready for final quotation only
-         * when every applicable item is ready.
-         */
-        const allItemsReady =
-          applicableItems.length > 0 &&
-          applicableItems.every(
-            (jobItem) =>
-              jobItem.currentStatus ===
-              'pending_final_quote',
-          );
+//         /*
+//          * The job is ready for final quotation only
+//          * when every applicable item is ready.
+//          */
+//         const allItemsReady =
+//           applicableItems.length > 0 &&
+//           applicableItems.every(
+//             (jobItem) =>
+//               jobItem.currentStatus ===
+//               'pending_final_quote',
+//           );
 
-        /* -------------------------------------------------
-           Move job into pending_final_quote only when
-           the LAST applicable item becomes ready.
-           ------------------------------------------------- */
+//         /* -------------------------------------------------
+//            Move job into pending_final_quote only when
+//            the LAST applicable item becomes ready.
+//            ------------------------------------------------- */
 
-        if (
-          allItemsReady &&
-          job.currentStatus ===
-            'repair_in_progress'
-        ) {
-          await transitionJob({
-            jobId: job.id,
+//         if (
+//           allItemsReady &&
+//           job.currentStatus ===
+//             'repair_in_progress'
+//         ) {
+//           await transitionJob({
+//             jobId: job.id,
 
-            previousStatus:
-              job.currentStatus,
+//             previousStatus:
+//               job.currentStatus,
 
-            newStatus:
-              'pending_final_quote',
+//             newStatus:
+//               'pending_final_quote',
 
-            changedBy: userId,
+//             changedBy: userId,
 
-            note:
-              'All applicable job items are ready for final quotation',
+//             note:
+//               'All applicable job items are ready for final quotation',
 
-            updateJob: async (
-              transaction,
-            ) => {
-              const [updatedJob] =
-                await transaction
-                  .update(jobs)
-                  .set({
-                    currentStatus:
-                      'pending_final_quote',
+//             updateJob: async (
+//               transaction,
+//             ) => {
+//               const [updatedJob] =
+//                 await transaction
+//                   .update(jobs)
+//                   .set({
+//                     currentStatus:
+//                       'pending_final_quote',
 
-                    updatedAt:
-                      new Date(),
-                  })
-                  .where(
-                    eq(
-                      jobs.id,
-                      job.id,
-                    ),
-                  )
-                  .returning();
+//                     updatedAt:
+//                       new Date(),
+//                   })
+//                   .where(
+//                     eq(
+//                       jobs.id,
+//                       job.id,
+//                     ),
+//                   )
+//                   .returning();
 
-              return updatedJob;
-            },
+//               return updatedJob;
+//             },
 
-            existingTx: tx,
-          });
-        }
+//             existingTx: tx,
+//           });
+//         }
 
-        return updated;
-      });
+//         return updated;
+//       });
 
-    return res.status(200).json({
-      message:
-        'Diagnosis completed. Item sent to Customer Service for final quotation.',
+//     return res.status(200).json({
+//       message:
+//         'Diagnosis completed. Item sent to Customer Service for final quotation.',
 
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Request final quote error:',
-      error,
-    );
+//       item: updatedItem,
+//     });
+//   } catch (error) {
+//     console.error(
+//       'Request final quote error:',
+//       error,
+//     );
 
-    return res.status(500).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Internal server error',
-    });
-  }
-};
+//     return res.status(500).json({
+//       error:
+//         error instanceof Error
+//           ? error.message
+//           : 'Internal server error',
+//     });
+//   }
+// };
 
 
 
