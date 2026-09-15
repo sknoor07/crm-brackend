@@ -10,7 +10,7 @@ import { AcceptInvitationInput, LoginInput } from './auth.validation.js';
 import crypto from 'crypto';
 
 // Helper to hash tokens before saving to DB for security
-const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
+export const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
 const getCookieValue = (req: Request, name: string) => {
   const cookieHeader = req.headers.cookie;
@@ -22,7 +22,7 @@ const getCookieValue = (req: Request, name: string) => {
   return cookie ? decodeURIComponent(cookie.slice(name.length + 1)) : undefined;
 };
 
-const generateInvitationToken = () => {
+export const generateInvitationToken = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 

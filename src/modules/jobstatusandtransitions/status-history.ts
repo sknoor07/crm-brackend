@@ -44,6 +44,7 @@ export const allowedJobTransitions: Record<
   ],
 
   repair_in_progress: [
+    'repair_in_progress',
     'pending_final_quote',  //lab
     'repair_completed',   //lab
   ],

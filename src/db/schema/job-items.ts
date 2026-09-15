@@ -20,6 +20,8 @@ export const jobItems = pgTable('job_items', {
     .references(() => jobs.id)
     .notNull(),
 
+  deviceName:varchar('device_name',{length:100}).notNull(),
+
   deviceCategory: varchar('device_category', {
     length: 100,
   }).notNull(),

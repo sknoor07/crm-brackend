@@ -3,15 +3,144 @@ import { desc, eq, inArray } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import { jobs, jobItems, jobComments, deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes, jobItemQuoteLines, } from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes, jobItemQuoteLines, users, customerProfiles, userRoles, roles, } from '../../db/schema/index.js';
 
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 
 import { updateJobItemWithStatusTransition, } from '../jobstatusandtransitions/item-status-history.js';
 
-import { CreateCustomerJobInput, CreateCustomerJobItemSchema, QuoteResponseInput } from './customer.validation.js';
+import { CreateCustomerJobInput, CreateCustomerJobItemSchema, CustomerJobs, CustomerRegistrationSchema, QuoteResponseInput } from './customer.validation.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
+import { generateInvitationToken, hashToken } from '../auth/auth.controller.js';
+import { hashPassword } from '../../shared/utils/password.js';
 
+
+
+
+export const registerCustomer = async (
+  req: Request<{}, {}, CustomerRegistrationSchema>,
+  res: Response
+) => {
+  try {
+    const {
+      firstName,
+      lastName,
+      phoneNumber,
+      email,
+      password,
+    } = req.body;
+
+
+    // --------------------------------------------------
+    // Check existing email
+    // --------------------------------------------------
+
+    const existingEmail = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (existingEmail.length > 0) {
+      return res.status(400).json({
+        error: 'Email is already registered',
+      });
+    }
+
+    // --------------------------------------------------
+    // Check existing phone
+    // --------------------------------------------------
+
+    if (phoneNumber) {
+      const existingPhone = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.phone, phoneNumber))
+        .limit(1);
+
+      if (existingPhone.length > 0) {
+        return res.status(400).json({
+          error: 'Phone number is already registered',
+        });
+      }
+    }
+
+    // --------------------------------------------------
+    // Hash password
+    // --------------------------------------------------
+
+    const hashedPassword = await hashPassword(password);
+
+    // --------------------------------------------------
+    // Transaction
+    // --------------------------------------------------
+
+    const result = await db.transaction(async (tx) => {
+      // Create customer user
+      const [newUser] = await tx
+        .insert(users)
+        .values({
+          email,
+          passwordHash: hashedPassword,
+          userType: 'customer',
+          phone: phoneNumber,
+          isActive: true,
+          mustChangePassword: false,
+        })
+        .returning({
+          id: users.id,
+          email: users.email,
+        });
+
+      // Create customer profile
+      await tx.insert(customerProfiles).values({
+        userId: newUser.id,
+        firstName,
+        lastName,
+        phone: phoneNumber,
+      });
+
+      // Find customer role
+      const [customerRole] = await tx
+        .select({
+          id: roles.id,
+        })
+        .from(roles)
+        .where(eq(roles.name, 'customer'))
+        .limit(1);
+
+      if (!customerRole) {
+        throw new Error('Customer role not found');
+      }
+
+      // Assign customer role
+      await tx.insert(userRoles).values({
+        userId: newUser.id,
+        roleId: customerRole.id,
+      });
+
+      return newUser;
+    });
+
+    // --------------------------------------------------
+    // Success response
+    // --------------------------------------------------
+
+    return res.status(201).json({
+      message: 'User created successfully',
+      user: {
+        id: result.id,
+        email: result.email,
+      },
+    });
+  } catch (err) {
+    console.error('Customer registration error:', err);
+
+    return res.status(500).json({
+      error: 'Internal server error. Please try again later.',
+    });
+  }
+};
 
 /**
 customer will create a job will multiple job items.
@@ -27,6 +156,7 @@ export const createCustomerJob = async (
 
     if (!customerId) {
       return res.status(401).json({
+
         error: 'Authenticated customer is required',
       });
     }
@@ -80,6 +210,7 @@ export const createCustomerJob = async (
       const jobItemsToInsert = items.map((item) => ({
         id: crypto.randomUUID(),
         jobId: job.id,
+        deviceName:item.deviceName,
         deviceCategory: item.deviceCategory,
         deviceSerialNumber: item.deviceSerialNumber,
         issueDescription: item.issueDescription,
@@ -185,6 +316,125 @@ export const createCustomerJob = async (
     });
   }
 };
+
+
+export const getAllOrders= async(req: Request, res:Response <{},CustomerJobs >)=>{
+  try{
+    const customerId =req.user?.userId;
+    const result = await db
+    .select({
+      // -------------------------
+      // Job
+      // -------------------------
+      jobId: jobs.id,
+      jobNumber: jobs.jobNumber,
+      jobCurrentStatus: jobs.currentStatus,
+      paymentConfirmed: jobs.paymentConfirmed,
+      jobCreatedAt: jobs.createdAt,
+
+      // -------------------------
+      // Job Item
+      // -------------------------
+      itemId: jobItems.id,
+      deviceName: jobItems.deviceName,
+      deviceCategory: jobItems.deviceCategory,
+      deviceSerialNumber: jobItems.deviceSerialNumber,
+      issueDescription: jobItems.issueDescription,
+      issueCategory: jobItems.issueCategory,
+      repairLocation: jobItems.repairLocation,
+
+      estimatedComponentsCost:
+        jobItems.estimatedComponentsCost,
+
+      finalComponentsCost:
+        jobItems.finalComponentsCost,
+
+      serviceChargeApplied:
+        jobItems.serviceChargeApplied,
+
+      isFinalQuoteApproved:
+        jobItems.isFinalQuoteApproved,
+      baseRepairCost: jobItems.baseRepairCost,
+
+      itemCreatedAt: jobItems.createdAt,
+    })
+    .from(jobs)
+    .leftJoin(
+      jobItems,
+      eq(jobItems.jobId, jobs.id),
+    )
+    .where(
+      eq(jobs.customerId, customerId),
+    );
+    const jobsMap = new Map<
+    string,
+    CustomerJobWithItems
+  >();
+
+  for (const row of result) {
+    // =========================
+    // CREATE JOB
+    // =========================
+
+    if (!jobsMap.has(row.jobId)) {
+      jobsMap.set(row.jobId, {
+        job: {
+          id: row.jobId,
+          jobNumber: row.jobNumber,
+          currentStatus: row.jobCurrentStatus,
+          paymentConfirmed: row.paymentConfirmed,
+          createdAt: row.jobCreatedAt,
+          updatedAt: row.jobUpdatedAt,
+        },
+
+        items: [],
+      });
+    }
+
+    // =========================
+    // ADD ITEM TO JOB
+    // =========================
+
+    if (row.itemId) {
+      jobsMap.get(row.jobId)!.items.push({
+        id: row.itemId,
+
+        deviceName: row.deviceName!,
+        deviceCategory: row.deviceCategory!,
+        deviceSerialNumber: row.deviceSerialNumber,
+
+        issueDescription: row.issueDescription!,
+        issueCategory: row.issueCategory,
+
+        repairLocation: row.repairLocation!,
+
+        estimatedComponentsCost:
+          row.estimatedComponentsCost,
+
+        finalComponentsCost:
+          row.finalComponentsCost,
+
+        serviceChargeApplied:
+          row.serviceChargeApplied,
+
+        isFinalQuoteApproved:
+          row.isFinalQuoteApproved,
+
+        baseRepairCost:
+          row.baseRepairCost,
+
+        createdAt:
+          row.itemCreatedAt,
+
+      });
+    }
+  }
+  res.status(200).json(Array.from(jobsMap.values()));
+
+  }catch(err){
+    res.status(500).json({mesaage:"can't fetch order history"})
+  }
+}
 
 /**
  * ============================================================

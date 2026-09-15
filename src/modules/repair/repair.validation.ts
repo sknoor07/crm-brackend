@@ -266,6 +266,10 @@ export type RejectRepairInspectionInput =
   export const completeInspection= z.object({
     jobItemId:z.string().uuid("Invalid Job Id"),
     comment:z.string().trim().min(1,'PLease Enter the parts needed').max(2000,"Cannot enter more than 2000 characters"),
+    decision: z.enum([
+          'repairable',
+          'unrepairable',
+        ]),
   })
 
   export type CompleteInspection= z.infer<typeof completeInspection>;
