@@ -1,3 +1,5 @@
+import { otpVerifications } from './otp_verifications.js';
+
 export * from './users.js';
 export * from './roles.js';
 export * from './teams.js';
@@ -20,3 +22,4 @@ export * from './repeat-repairs.js';
 export * from './job-item-quotes.js';
 export * from './job-item-quote-lines.js';
 export * from './job_quotes.js';
+export * from './otp_verifications.js'

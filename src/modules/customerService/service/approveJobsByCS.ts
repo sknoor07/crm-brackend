@@ -246,30 +246,27 @@ export const approveJobItemByCS = async (
 
       async (transaction: DbTransaction) => {
         const [updatedJobItem] =
-          await transaction
-            .update(jobItems)
-            .set({
-              currentStatus:
-                'approved_for_transport',
+  await transaction
+    .update(jobItems)
+    .set({
+      deviceName: input.deviceName,
+      deviceCategory: input.deviceCategory,
+      deviceSerialNumber: input.deviceSerialNumber,
+      issueDescription: input.issueDescription,
+      issueCategory: input.issueCategory,
+      repairLocation: input.repairLocation,
 
-              isApprovedByCS:
-                true,
+      currentStatus: 'approved_for_transport',
 
-              estimatedComponentsCost:
-                moneyString(
-                  quoteValues.componentsCost,
-                ),
+      isApprovedByCS: true,
 
-              updatedAt:
-                new Date(),
-            })
-            .where(
-              eq(
-                jobItems.id,
-                jobItem.id,
-              ),
-            )
-            .returning();
+      estimatedComponentsCost:
+        moneyString(quoteValues.componentsCost),
+
+      updatedAt: new Date(),
+    })
+    .where(eq(jobItems.id, jobItem.id))
+    .returning();
 
         if (!updatedJobItem) {
           throw new Error(
@@ -371,20 +368,15 @@ export const rejectJobItemByCS = async (
   tx: DbTransaction,
   params: {
     jobItem: typeof jobItems.$inferSelect;
-    comment: string;
+    input: CSApproveJobItemInput;
     changedBy: string;
   },
 ) => {
   const {
     jobItem,
-    comment,
+    input,
     changedBy,
   } = params;
-
-
-  // ------------------------------------------------
-  // Update job item through transition helper
-  // ------------------------------------------------
 
   const updatedJobItem =
     await updateJobItemWithStatusTransition(
@@ -399,6 +391,19 @@ export const rejectJobItemByCS = async (
           await transaction
             .update(jobItems)
             .set({
+              // Editable fields
+              deviceName: input.deviceName,
+              deviceCategory: input.deviceCategory,
+              deviceSerialNumber:
+                input.deviceSerialNumber,
+              issueDescription:
+                input.issueDescription,
+              issueCategory:
+                input.issueCategory,
+              repairLocation:
+                input.repairLocation,
+
+              // Workflow fields
               currentStatus:
                 'repair_rejected',
 
@@ -427,21 +432,16 @@ export const rejectJobItemByCS = async (
 
       changedBy,
 
-      comment.trim(),
+      input.comment.trim(),
 
       tx,
     );
 
-
   return {
-    jobItem:
-      updatedJobItem,
-
-    quote:
-      null,
-
-    quoteValues:
-      null,
+    jobItem: updatedJobItem,
+    quote: null,
+    quoteValues: null,
+    serviceCharge: 0,
   };
 };
 
@@ -449,7 +449,6 @@ export const rejectJobItemByCS = async (
 // --------------------------------------------------
 // Process one item according to CS decision
 // --------------------------------------------------
-
 export const processJobItemForCS = async (
   tx: DbTransaction,
   params: {
@@ -466,11 +465,6 @@ export const processJobItemForCS = async (
     jobQuoteId,
   } = params;
 
-
-  // ------------------------------------------------
-  // Validate current status
-  // ------------------------------------------------
-
   if (
     jobItem.currentStatus !==
     'pending_cs_verification'
@@ -480,47 +474,27 @@ export const processJobItemForCS = async (
     );
   }
 
-
-  // ------------------------------------------------
-  // Approved
-  // ------------------------------------------------
-
-  if (
-    input.decision ===
-    'approved'
-  ) {
+  if (input.decision === 'approved') {
     return approveJobItemByCS(
       tx,
       {
         jobItem,
-
         input,
-
         changedBy,
-
         jobQuoteId,
       },
     );
   }
 
-
-  // ------------------------------------------------
-  // Rejected
-  // ------------------------------------------------
-
   return rejectJobItemByCS(
     tx,
     {
       jobItem,
-
-      comment:
-        input.comment,
-
+      input,
       changedBy,
     },
   );
 };
-
 // --------------------------------------------------
 // Reject entire job
 // --------------------------------------------------

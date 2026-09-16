@@ -8,9 +8,9 @@ import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '.
 import { refreshTokens } from '../../db/schema/index.js';
 import { AcceptInvitationInput, LoginInput } from './auth.validation.js';
 import crypto from 'crypto';
+import { hashToken } from '../../shared/utils/token.js';
+import { createLoginSession } from './auth-session.service.js';
 
-// Helper to hash tokens before saving to DB for security
-export const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
 const getCookieValue = (req: Request, name: string) => {
   const cookieHeader = req.headers.cookie;
@@ -151,20 +151,11 @@ export const loginUser = async (req: Request<{}, {}, LoginInput>, res: Response)
       });
     }
 
-    // 3. Generate Tokens
-    const accessToken = generateAccessToken({ userId: user.id, userType: user.userType });
-    const refreshToken = generateRefreshToken(user.id);
-
-    // 4. Calculate 14-day expiry date for session storage
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 14);
-
-    // 5. Save session (refresh token hash) in database
-    await db.insert(refreshTokens).values({
-      userId: user.id,
-      tokenHash: hashToken(refreshToken),
-      expiresAt,
-    });
+    const { accessToken, refreshToken } =
+  await createLoginSession({
+    userId: user.id,
+    userType: user.userType,
+  });
 
     // 6. Send Refresh Token securely via HTTP-only cookie (14 days)
     res.cookie('refreshToken', refreshToken, {

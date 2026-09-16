@@ -21,6 +21,7 @@ import {
   seacrhCustomerDetailswithJob,
   getjobDetails,
   getPendingFinalQuotes,
+  getAllCustomers,
 } from './cs.controller.js';
 
 import {
@@ -97,6 +98,11 @@ router.patch('/final-quote',
   validateRequest(generateFinalQuoteSchema,),
   generateFinalQuote,
 );
+
+router.get("/get-all-customers",
+  requireRole(csRoles),
+  getAllCustomers
+)
 
 
 

@@ -4,8 +4,11 @@ import {
   createCustomerJob,
   getAllOrders,
   getCustomerPendingQuotes,
+  getCustomerProfile,
   registerCustomer,
   respondToQuote,
+  updateCustomerProfile,
+  updatePassword,
   // respondToQuote,
 } from './customer.controller.js';
 
@@ -61,4 +64,9 @@ router.get(
   requireRole(['customer']),
   getCustomerPendingQuotes,
 );
+
+router.get('/profile',requireAuth,requireRole(['customer']),getCustomerProfile);
+router.patch("/update-profile",requireAuth,requireRole(['customer']),updateCustomerProfile);
+router.patch('/update-password',requireAuth,requireRole(['customer']),updatePassword)
 export default router;
+

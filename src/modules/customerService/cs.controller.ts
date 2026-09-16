@@ -207,6 +207,60 @@ export const searchCustomers = async (
 };
 
 
+export const getAllCustomers = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+
+    const customers = await db
+      .select({
+        customerId: users.id,
+        firstName: customerProfiles.firstName,
+        lastName: customerProfiles.lastName,
+        email: users.email,
+        phone: customerProfiles.phone,
+      })
+      .from(users)
+      .innerJoin(
+        customerProfiles,
+        eq(
+          customerProfiles.userId,
+          users.id,
+        ),
+      )
+      .leftJoin(
+        jobs,
+        eq(
+          jobs.customerId,
+          users.id,
+        ),
+      )
+      .groupBy(
+        users.id,
+        customerProfiles.firstName,
+        customerProfiles.lastName,
+        users.email,
+        customerProfiles.phone,
+      ).orderBy(desc(users.createdAt));
+
+    return res.status(200).json({
+      status: 'success',
+      data: customers,
+    });
+
+  } catch (error) {
+    console.error(
+      'Search customers error:',
+      error,
+    );
+
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to search customers.',
+    });
+  }
+};
 
 
 /**

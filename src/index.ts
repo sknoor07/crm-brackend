@@ -13,6 +13,7 @@ import rolesRoutes from './modules/roles/roles.routes.js';
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 import technicianRoutes from './modules/transport-team-person/transportPerson.routes.js';
+import otpRoutes from './modules/otp/otp.routes.js';
 
 
 dotenv.config();
@@ -40,6 +41,7 @@ app.use('/api/v1/technician', technicianRoutes);
 app.use('/api/v1/customer', customerRoutes);
 app.use('/api/v1/comments',commentRoutes);
 app.use('/api/v1/repair', repairRoutes);
+app.use('/api/v1/otp',otpRoutes);
 
 app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'OK', message: 'API is running smoothly!' });

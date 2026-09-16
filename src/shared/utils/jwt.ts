@@ -26,3 +26,18 @@ export const verifyAccessToken = (token: string): TokenPayload => {
 export const verifyRefreshToken = (token: string): { userId: string } => {
   return jwt.verify(token, REFRESH_SECRET) as { userId: string };
 };
+
+export const generatePasswordResetToken = (
+  userId: string,
+): string => {
+  return jwt.sign(
+    {
+      userId,
+      purpose: 'password_reset',
+    },
+    process.env.JWT_SECRET!,
+    {
+      expiresIn: '10m',
+    },
+  );
+};

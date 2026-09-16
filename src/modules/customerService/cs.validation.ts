@@ -34,6 +34,40 @@ export const csApproveJobItemSchema = z
       .string()
       .uuid('Invalid job item ID'),
 
+    deviceName: z
+      .string()
+      .trim()
+      .min(1, 'Device name is required')
+      .max(100, 'Device name cannot exceed 100 characters'),
+
+    deviceCategory: z
+      .string()
+      .trim()
+      .min(1, 'Device category is required')
+      .max(100, 'Device category cannot exceed 100 characters'),
+
+    deviceSerialNumber: z
+      .string()
+      .trim()
+      .max(50, 'Serial number cannot exceed 50 characters')
+      .nullable(),
+
+    issueDescription: z
+      .string()
+      .trim()
+      .min(1, 'Issue description is required'),
+
+    issueCategory: z
+      .string()
+      .trim()
+      .max(50, 'Issue category cannot exceed 50 characters')
+      .nullable(),
+
+    repairLocation: z.enum([
+  'customer_site',
+  'inlab',
+]),
+
     decision: z.enum([
       'approved',
       'rejected',
@@ -43,16 +77,12 @@ export const csApproveJobItemSchema = z
       .string()
       .trim()
       .min(1, 'Comment is required')
-      .max(
-        2000,
-        'Comment cannot exceed 2000 characters',
-      ),
+      .max(2000, 'Comment cannot exceed 2000 characters'),
 
     estimatedComponents: z
       .array(estimatedComponentSchema)
       .default([]),
   })
-
   .superRefine((item, ctx) => {
     if (
       item.decision === 'approved' &&

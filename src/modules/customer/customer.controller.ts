@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
@@ -9,9 +9,9 @@ import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 
 import { updateJobItemWithStatusTransition, } from '../jobstatusandtransitions/item-status-history.js';
 
-import { CreateCustomerJobInput, CreateCustomerJobItemSchema, CustomerJobs, CustomerRegistrationSchema, QuoteResponseInput } from './customer.validation.js';
+import { CreateCustomerJobInput, CreateCustomerJobItemSchema, CustomerJob, CustomerJobs, CustomerProfile, CustomerRegistrationSchema, QuoteResponseInput, UpdatePassword } from './customer.validation.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
-import { generateInvitationToken, hashToken } from '../auth/auth.controller.js';
+
 import { hashPassword } from '../../shared/utils/password.js';
 
 
@@ -210,7 +210,7 @@ export const createCustomerJob = async (
       const jobItemsToInsert = items.map((item) => ({
         id: crypto.randomUUID(),
         jobId: job.id,
-        deviceName:item.deviceName,
+        deviceName: item.deviceName,
         deviceCategory: item.deviceCategory,
         deviceSerialNumber: item.deviceSerialNumber,
         issueDescription: item.issueDescription,
@@ -318,121 +318,119 @@ export const createCustomerJob = async (
 };
 
 
-export const getAllOrders= async(req: Request, res:Response <{},CustomerJobs >)=>{
-  try{
-    const customerId =req.user?.userId;
+export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>) => {
+  try {
+    const customerId = req.user?.userId;
+    if(!customerId){
+      res.status(401).json({message:"user not authenticated"});
+      return
+    }
     const result = await db
-    .select({
-      // -------------------------
-      // Job
-      // -------------------------
-      jobId: jobs.id,
-      jobNumber: jobs.jobNumber,
-      jobCurrentStatus: jobs.currentStatus,
-      paymentConfirmed: jobs.paymentConfirmed,
-      jobCreatedAt: jobs.createdAt,
+      .select({
+        // -------------------------
+        // Job
+        // -------------------------
+        jobId: jobs.id,
+        jobNumber: jobs.jobNumber,
+        jobCurrentStatus: jobs.currentStatus,
+        paymentConfirmed: jobs.paymentConfirmed,
+        jobCreatedAt: jobs.createdAt,
 
-      // -------------------------
-      // Job Item
-      // -------------------------
-      itemId: jobItems.id,
-      deviceName: jobItems.deviceName,
-      deviceCategory: jobItems.deviceCategory,
-      deviceSerialNumber: jobItems.deviceSerialNumber,
-      issueDescription: jobItems.issueDescription,
-      issueCategory: jobItems.issueCategory,
-      repairLocation: jobItems.repairLocation,
+        // -------------------------
+        // Job Item
+        // -------------------------
+        itemId: jobItems.id,
+        deviceName: jobItems.deviceName,
+        deviceCategory: jobItems.deviceCategory,
+        deviceSerialNumber: jobItems.deviceSerialNumber,
+        issueDescription: jobItems.issueDescription,
+        issueCategory: jobItems.issueCategory,
+        repairLocation: jobItems.repairLocation,
 
-      estimatedComponentsCost:
-        jobItems.estimatedComponentsCost,
+        estimatedComponentsCost:
+          jobItems.estimatedComponentsCost,
 
-      finalComponentsCost:
-        jobItems.finalComponentsCost,
+        finalComponentsCost:
+          jobItems.finalComponentsCost,
 
-      serviceChargeApplied:
-        jobItems.serviceChargeApplied,
+        serviceChargeApplied:
+          jobItems.serviceChargeApplied,
 
-      isFinalQuoteApproved:
-        jobItems.isFinalQuoteApproved,
-      baseRepairCost: jobItems.baseRepairCost,
+        isFinalQuoteApproved:
+          jobItems.isFinalQuoteApproved,
+        baseRepairCost: jobItems.baseRepairCost,
 
-      itemCreatedAt: jobItems.createdAt,
-    })
-    .from(jobs)
-    .leftJoin(
-      jobItems,
-      eq(jobItems.jobId, jobs.id),
-    )
-    .where(
-      eq(jobs.customerId, customerId),
-    );
-    const jobsMap = new Map<
-    string,
-    CustomerJobWithItems
-  >();
+        itemCreatedAt: jobItems.createdAt,
+      })
+      .from(jobs)
+      .leftJoin(
+        jobItems,
+        eq(jobItems.jobId, jobs.id),
+      )
+      .where(
+        eq(jobs.customerId, customerId),
+      );
 
-  for (const row of result) {
-    // =========================
-    // CREATE JOB
-    // =========================
+    const jobsMap = new Map<string, CustomerJob>();
 
-    if (!jobsMap.has(row.jobId)) {
-      jobsMap.set(row.jobId, {
-        job: {
+    for (const row of result) {
+      // =========================
+      // CREATE JOB
+      // =========================
+
+      if (!jobsMap.has(row.jobId)) {
+        jobsMap.set(row.jobId, {
           id: row.jobId,
           jobNumber: row.jobNumber,
           currentStatus: row.jobCurrentStatus,
           paymentConfirmed: row.paymentConfirmed,
           createdAt: row.jobCreatedAt,
-          updatedAt: row.jobUpdatedAt,
-        },
+          items: [],
+        });
+      }
 
-        items: [],
-      });
+      // =========================
+      // ADD ITEM TO JOB
+      // =========================
+
+      if (row.itemId) {
+        jobsMap.get(row.jobId)!.items.push({
+          id: row.itemId,
+
+          deviceName: row.deviceName!,
+          deviceCategory: row.deviceCategory!,
+          deviceSerialNumber: row.deviceSerialNumber,
+
+          issueDescription: row.issueDescription!,
+          issueCategory: row.issueCategory,
+
+          repairLocation: row.repairLocation!,
+
+          estimatedComponentsCost:
+            row.estimatedComponentsCost,
+
+          finalComponentsCost:
+            row.finalComponentsCost,
+
+          serviceChargeApplied:
+            row.serviceChargeApplied,
+
+          isFinalQuoteApproved:
+            row.isFinalQuoteApproved ?? false,
+
+          baseRepairCost:
+            row.baseRepairCost,
+
+          createdAt:
+            row.itemCreatedAt,
+
+        });
+      }
     }
+    res.status(200).json(Array.from(jobsMap.values()));
 
-    // =========================
-    // ADD ITEM TO JOB
-    // =========================
-
-    if (row.itemId) {
-      jobsMap.get(row.jobId)!.items.push({
-        id: row.itemId,
-
-        deviceName: row.deviceName!,
-        deviceCategory: row.deviceCategory!,
-        deviceSerialNumber: row.deviceSerialNumber,
-
-        issueDescription: row.issueDescription!,
-        issueCategory: row.issueCategory,
-
-        repairLocation: row.repairLocation!,
-
-        estimatedComponentsCost:
-          row.estimatedComponentsCost,
-
-        finalComponentsCost:
-          row.finalComponentsCost,
-
-        serviceChargeApplied:
-          row.serviceChargeApplied,
-
-        isFinalQuoteApproved:
-          row.isFinalQuoteApproved,
-
-        baseRepairCost:
-          row.baseRepairCost,
-
-        createdAt:
-          row.itemCreatedAt,
-
-      });
-    }
-  }
-  res.status(200).json(Array.from(jobsMap.values()));
-
-  }catch(err){
-    res.status(500).json({mesaage:"can't fetch order history"})
+  } catch (err) {
+    res.status(500).json({ mesaage: "can't fetch order history" })
   }
 }
 
@@ -1182,3 +1180,87 @@ export const getCustomerPendingQuotes = async (
     });
   }
 };
+
+
+export const getCustomerProfile = async (req: Request, res: Response<{}, CustomerProfile>) => {
+  try {
+    const userId= req.user?.userId;
+    if(!userId){
+      res.status(401).json({message:"auauthenticated user"});
+      return
+    }
+    const result = await db.select({ firstName: customerProfiles.firstName, lastName: customerProfiles.lastName, email: users.email, phoneNumber: users.phone, billingAddress:customerProfiles.billingAddress}).from(users).innerJoin(customerProfiles, eq(users.id, customerProfiles.userId)).where(eq(users.id,userId)).limit(1);
+    res.status(200).json({ message: "Profile Fetched Successfully", data: result });
+  } catch (err) {
+    res.status(404).json({ message: "Profiel cannot be fecthed" })
+  }
+}
+
+export const updateCustomerProfile = async (req: Request<{}, {}, CustomerProfile>, res: Response) => {
+  try {
+    const data = req.body;
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Only Authenticated User can update his profile " });
+      return;
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const user = await tx
+        .select()
+        .from(users)
+        .where(eq(users.id, userId));
+
+      const userResult = await tx
+        .update(users)
+        .set({
+          email: data.email,
+          phone: data.phoneNumber,
+        })
+        .where(eq(users.id, userId))
+        .returning();
+
+      const profileResult = await tx
+        .update(customerProfiles)
+        .set({
+          phone: data.phoneNumber,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          billingAddress:data.billingAddress
+        })
+        .where(eq(customerProfiles.userId, userId))
+        .returning();
+
+      return {
+        user,
+        userResult,
+        profileResult,
+      };
+    });
+
+    res.status(200).json({ message: "Profile Fetched Successfully", data: result });
+  } catch (err) {
+    res.status(404).json({ message: "Profiel cannot be fecthed" })
+  }
+}
+
+export const updatePassword = async( req:Request<{},{},UpdatePassword>,res:Response)=>{
+  try{
+  const userId= req.user?.userId;
+    if(!userId){
+      res.status(401).json({message:"auauthenticated user"});
+      return
+    }
+  const {password}=req.body;
+  await db
+  .update(users)
+  .set({
+    passwordHash: await hashPassword(password),
+  })
+  .where(eq(users.id, userId))
+  .returning();
+  res.status(200).json({message:"Password Updated successfully"});
+  }catch(err){
+    res.status(500).json({message:"Interval Server Error Cannot update Passswor",error:err})
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "id": "2b8bee05-45a2-4d73-afd6-dcc13369e59e",
+  "id": "bad653fc-0ced-44c1-92ff-f0f11dacc8e0",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -700,17 +700,25 @@
         },
         "current_status": {
           "name": "current_status",
-          "type": "job_status",
+          "type": "job_summary_status",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'pending_cs_verification'"
+          "default": "'in_progress'"
         },
-        "repair_location": {
-          "name": "repair_location",
-          "type": "varchar(20)",
+        "payment_confirmed": {
+          "name": "payment_confirmed",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "default": false
+        },
+        "is_approved_by_cs": {
+          "name": "is_approved_by_cs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
         },
         "transport_manager_id": {
           "name": "transport_manager_id",
@@ -718,14 +726,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "repair_manager_id": {
-          "name": "repair_manager_id",
+        "assigned_transport_team_person_id": {
+          "name": "assigned_transport_team_person_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "assigned_pickup_tech_id": {
-          "name": "assigned_pickup_tech_id",
+        "repair_manager_id": {
+          "name": "repair_manager_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -779,12 +787,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "jobs_repair_manager_id_users_id_fk": {
-          "name": "jobs_repair_manager_id_users_id_fk",
+        "jobs_assigned_transport_team_person_id_users_id_fk": {
+          "name": "jobs_assigned_transport_team_person_id_users_id_fk",
           "tableFrom": "jobs",
           "tableTo": "users",
           "columnsFrom": [
-            "repair_manager_id"
+            "assigned_transport_team_person_id"
           ],
           "columnsTo": [
             "id"
@@ -792,12 +800,12 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "jobs_assigned_pickup_tech_id_users_id_fk": {
-          "name": "jobs_assigned_pickup_tech_id_users_id_fk",
+        "jobs_repair_manager_id_users_id_fk": {
+          "name": "jobs_repair_manager_id_users_id_fk",
           "tableFrom": "jobs",
           "tableTo": "users",
           "columnsFrom": [
-            "assigned_pickup_tech_id"
+            "repair_manager_id"
           ],
           "columnsTo": [
             "id"
@@ -850,6 +858,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "device_name": {
+          "name": "device_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
         "device_category": {
           "name": "device_category",
           "type": "varchar(100)",
@@ -874,13 +888,69 @@
           "primaryKey": false,
           "notNull": false
         },
-        "current_status": {
-          "name": "current_status",
-          "type": "job_status",
+        "repair_location": {
+          "name": "repair_location",
+          "type": "repair_location",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'pending_cs_verification'"
+          "default": "'customer_site'"
+        },
+        "current_status": {
+          "name": "current_status",
+          "type": "job_item_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'created'"
+        },
+        "is_approved_by_cs": {
+          "name": "is_approved_by_cs",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "onsite_repair_authorized": {
+          "name": "onsite_repair_authorized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "repair_finished_onsite": {
+          "name": "repair_finished_onsite",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "inlab_repair_authorized": {
+          "name": "inlab_repair_authorized",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "inlab_repair_rejected": {
+          "name": "inlab_repair_rejected",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "vendor_out": {
+          "name": "vendor_out",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "assigned_repair_person_id": {
+          "name": "assigned_repair_person_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "estimated_components_cost": {
           "name": "estimated_components_cost",
@@ -913,8 +983,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "technician_notes": {
-          "name": "technician_notes",
+        "diagnosis_notes": {
+          "name": "diagnosis_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "repair_notes": {
+          "name": "repair_notes",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -967,6 +1043,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "job_items_assigned_repair_person_id_users_id_fk": {
+          "name": "job_items_assigned_repair_person_id_users_id_fk",
+          "tableFrom": "job_items",
+          "tableTo": "users",
+          "columnsFrom": [
+            "assigned_repair_person_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -986,11 +1075,17 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "job_item_id": {
           "name": "job_item_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "user_id": {
           "name": "user_id",
@@ -1014,6 +1109,19 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "job_comments_job_id_jobs_id_fk": {
+          "name": "job_comments_job_id_jobs_id_fk",
+          "tableFrom": "job_comments",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "job_comments_job_item_id_job_items_id_fk": {
           "name": "job_comments_job_item_id_job_items_id_fk",
           "tableFrom": "job_comments",
@@ -1044,7 +1152,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "comment_target_check": {
+          "name": "comment_target_check",
+          "value": "\n        (\"job_id\" IS NOT NULL AND \"job_item_id\" IS NULL)\n        OR\n        (\"job_id\" IS NULL AND \"job_item_id\" IS NOT NULL)\n      "
+        }
+      },
       "isRLSEnabled": false
     },
     "public.job_status_history": {
@@ -1058,22 +1171,22 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "job_item_id": {
-          "name": "job_item_id",
+        "job_id": {
+          "name": "job_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
         "previous_status": {
           "name": "previous_status",
-          "type": "job_status",
+          "type": "job_summary_status",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": false
         },
         "new_status": {
           "name": "new_status",
-          "type": "job_status",
+          "type": "job_summary_status",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
@@ -1094,18 +1207,18 @@
           "name": "created_at",
           "type": "timestamp",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "default": "now()"
         }
       },
       "indexes": {},
       "foreignKeys": {
-        "job_status_history_job_item_id_job_items_id_fk": {
-          "name": "job_status_history_job_item_id_job_items_id_fk",
+        "job_status_history_job_id_jobs_id_fk": {
+          "name": "job_status_history_job_id_jobs_id_fk",
           "tableFrom": "job_status_history",
-          "tableTo": "job_items",
+          "tableTo": "jobs",
           "columnsFrom": [
-            "job_item_id"
+            "job_id"
           ],
           "columnsTo": [
             "id"
@@ -1116,6 +1229,92 @@
         "job_status_history_changed_by_users_id_fk": {
           "name": "job_status_history_changed_by_users_id_fk",
           "tableFrom": "job_status_history",
+          "tableTo": "users",
+          "columnsFrom": [
+            "changed_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.job_item_status_history": {
+      "name": "job_item_status_history",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "job_item_id": {
+          "name": "job_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previous_status": {
+          "name": "previous_status",
+          "type": "job_item_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "new_status": {
+          "name": "new_status",
+          "type": "job_item_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "changed_by": {
+          "name": "changed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "job_item_status_history_job_item_id_job_items_id_fk": {
+          "name": "job_item_status_history_job_item_id_job_items_id_fk",
+          "tableFrom": "job_item_status_history",
+          "tableTo": "job_items",
+          "columnsFrom": [
+            "job_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "job_item_status_history_changed_by_users_id_fk": {
+          "name": "job_item_status_history_changed_by_users_id_fk",
+          "tableFrom": "job_item_status_history",
           "tableTo": "users",
           "columnsFrom": [
             "changed_by"
@@ -1164,13 +1363,6 @@
         },
         "customer_confirmed": {
           "name": "customer_confirmed",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
-        "payment_confirmed": {
-          "name": "payment_confirmed",
           "type": "boolean",
           "primaryKey": false,
           "notNull": false,
@@ -1454,28 +1646,460 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.job_item_quotes": {
+      "name": "job_item_quotes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "job_quote_id": {
+          "name": "job_quote_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job_item_id": {
+          "name": "job_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "components_cost": {
+          "name": "components_cost",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "service_charge": {
+          "name": "service_charge",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_amount": {
+          "name": "total_amount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "job_item_quotes_job_quote_id_job_quotes_id_fk": {
+          "name": "job_item_quotes_job_quote_id_job_quotes_id_fk",
+          "tableFrom": "job_item_quotes",
+          "tableTo": "job_quotes",
+          "columnsFrom": [
+            "job_quote_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "job_item_quotes_job_item_id_job_items_id_fk": {
+          "name": "job_item_quotes_job_item_id_job_items_id_fk",
+          "tableFrom": "job_item_quotes",
+          "tableTo": "job_items",
+          "columnsFrom": [
+            "job_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "job_item_quotes_created_by_user_id_users_id_fk": {
+          "name": "job_item_quotes_created_by_user_id_users_id_fk",
+          "tableFrom": "job_item_quotes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.job_item_quote_lines": {
+      "name": "job_item_quote_lines",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quote_id": {
+          "name": "quote_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(200)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantity": {
+          "name": "quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "unit_price": {
+          "name": "unit_price",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "line_total": {
+          "name": "line_total",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "job_item_quote_lines_quote_id_job_item_quotes_id_fk": {
+          "name": "job_item_quote_lines_quote_id_job_item_quotes_id_fk",
+          "tableFrom": "job_item_quote_lines",
+          "tableTo": "job_item_quotes",
+          "columnsFrom": [
+            "quote_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.job_quotes": {
+      "name": "job_quotes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "job_id": {
+          "name": "job_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subtotal": {
+          "name": "subtotal",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "service_charge": {
+          "name": "service_charge",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "discount": {
+          "name": "discount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tax": {
+          "name": "tax",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_amount": {
+          "name": "total_amount",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "job_quote_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'estimate'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "job_quotes_job_id_jobs_id_fk": {
+          "name": "job_quotes_job_id_jobs_id_fk",
+          "tableFrom": "job_quotes",
+          "tableTo": "jobs",
+          "columnsFrom": [
+            "job_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "job_quotes_created_by_user_id_users_id_fk": {
+          "name": "job_quotes_created_by_user_id_users_id_fk",
+          "tableFrom": "job_quotes",
+          "tableTo": "users",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "job_quotes_job_id_version_unique": {
+          "name": "job_quotes_job_id_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "job_id",
+            "version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.otp_verifications": {
+      "name": "otp_verifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "otp_hash": {
+          "name": "otp_hash",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "channel": {
+          "name": "channel",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination": {
+          "name": "destination",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "otp_verifications_user_id_users_id_fk": {
+          "name": "otp_verifications_user_id_users_id_fk",
+          "tableFrom": "otp_verifications",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {
-    "public.job_status": {
-      "name": "job_status",
+    "public.job_item_status": {
+      "name": "job_item_status",
       "schema": "public",
       "values": [
+        "created",
         "pending_cs_verification",
-        "ready_for_pickup",
-        "pending_pickup",
+        "approved_for_transport",
+        "transport_visit_in_progress",
         "pending_final_quote",
+        "removed_from_quote",
+        "pending_lab_receipt",
+        "received_at_lab",
+        "assigned_to_repair_manager",
+        "assigned_to_repair_person",
         "awaiting_customer_approval",
-        "repair_in_progress",
-        "in_transit_to_lab",
-        "arrived_at_lab",
-        "in_lab_diagnosis",
-        "repair_completed",
+        "third_party_repair",
+        "pending_repair_manager_inspection",
+        "ready_for_delivery",
         "out_for_delivery",
         "delivered",
-        "closed",
         "repair_rejected",
         "cancelled"
+      ]
+    },
+    "public.job_summary_status": {
+      "name": "job_summary_status",
+      "schema": "public",
+      "values": [
+        "created",
+        "in_progress",
+        "assigning_pickup_Engineer",
+        "pending_visit",
+        "repair_started",
+        "going_to_lab",
+        "pending_final_quote",
+        "repair_in_progress",
+        "repair_completed",
+        "waitng_for_delivery",
+        "delivered",
+        "closed",
+        "done",
+        "cancelled"
+      ]
+    },
+    "public.repair_location": {
+      "name": "repair_location",
+      "schema": "public",
+      "values": [
+        "customer_site",
+        "inlab"
+      ]
+    },
+    "public.job_quote_status": {
+      "name": "job_quote_status",
+      "schema": "public",
+      "values": [
+        "estimate",
+        "pending",
+        "final",
+        "rejected"
       ]
     }
   },
