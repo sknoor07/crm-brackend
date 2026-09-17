@@ -334,12 +334,10 @@ export const getPickUpPersonList = async (req: Request, res: Response) => {
       .select({
         userId: users.id,
         email: users.email,
-        userType: users.userType,
         firstName: employeeProfiles.firstName,
         lastName: employeeProfiles.lastName,
         fullName: sql<string>`${employeeProfiles.firstName} || ' ' || ${employeeProfiles.lastName}`,
         phone: employeeProfiles.phone,
-        specializations: employeeProfiles.specializations,
       })
       .from(users)
       .innerJoin(employeeProfiles, eq(users.id, employeeProfiles.userId))
