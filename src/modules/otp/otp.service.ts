@@ -55,12 +55,12 @@ export const createOtp = async ({
 
   //deliver Otp
   await sendOtp({
-  channel,
-  destination,
-  otp,
-});
+    channel,
+    destination,
+    otp,
+  });
 
-  
+
 };
 
 
@@ -88,6 +88,13 @@ export const verifyOtp = async ({
     )
     .orderBy(desc(otpVerifications.createdAt))
     .limit(1);
+
+  console.log("OTP VERIFY");
+  console.log("Received OTP:", otp);
+  console.log("Record ID:", record?.id);
+  console.log("Attempts:", record?.attempts);
+  console.log("Expires:", record?.expiresAt);
+
 
   if (!record) {
     throw new Error('Invalid or expired OTP');

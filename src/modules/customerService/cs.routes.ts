@@ -22,6 +22,7 @@ import {
   getjobDetails,
   getPendingFinalQuotes,
   getAllCustomers,
+  getQuoteForAJob,
 } from './cs.controller.js';
 
 import {
@@ -105,7 +106,11 @@ router.get("/get-all-customers",
 )
 
 
-
+router.get(
+  "/quote/:id",
+  requireRole(csRoles),
+  getQuoteForAJob
+);
 
 
 ///done till here

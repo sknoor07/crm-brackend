@@ -10,6 +10,7 @@ import { generatePasswordResetToken } from '../../shared/utils/jwt.js';
 import { hashPassword } from '../../shared/utils/password.js';
 import jwt from 'jsonwebtoken';
 import { createLoginSession } from '../auth/auth-session.service.js';
+import z from 'zod';
 
 export const forgotPassword = async (
     req: Request<{}, {}, ForgotPasswordInput>,
@@ -171,16 +172,23 @@ export const requestOtpLogin = async (
     res: Response,
 ) => {
     try {
-        const { email } = req.body;
+        const { identifier } = req.body;
+
+        const isEmail = z.string().email().safeParse(identifier).success;
 
         const [user] = await db
             .select({
                 id: users.id,
                 email: users.email,
+                phone: users.phone,
                 isActive: users.isActive,
             })
             .from(users)
-            .where(eq(users.email, email))
+            .where(
+                isEmail
+                    ? eq(users.email, identifier)
+                    : eq(users.phone, identifier),
+            )
             .limit(1);
 
         if (!user || !user.isActive) {
@@ -188,12 +196,22 @@ export const requestOtpLogin = async (
                 error: 'Invalid email or OTP',
             });
         }
+        const channel = isEmail
+            ? OTP_CHANNEL.EMAIL
+            : OTP_CHANNEL.SMS;
 
+        const destination = isEmail ? user.email : user.phone;
+
+        if (!destination) {
+            return res.status(401).json({
+                error: "Invalid email/phone or OTP",
+            });
+        }
         await createOtp({
             userId: user.id,
             purpose: OTP_PURPOSE.LOGIN,
-            channel: OTP_CHANNEL.EMAIL,
-            destination: user.email,
+            channel,
+            destination,
         });
 
         return res.status(200).json({
@@ -210,57 +228,67 @@ export const requestOtpLogin = async (
 
 
 export const verifyOtpLogin = async (
-    req: Request,
-    res: Response,
+  req: Request,
+  res: Response,
 ) => {
-    try {
-        const { email, otp } = req.body;
+  try {
+    const { identifier, otp } = req.body;
 
-        const [user] = await db
-            .select({
-                id: users.id,
-                email: users.email,
-                userType: users.userType,
-                isActive: users.isActive,
-            })
-            .from(users)
-            .where(eq(users.email, email))
-            .limit(1);
+    const isEmail = z
+      .string()
+      .email()
+      .safeParse(identifier).success;
 
-        if (!user || !user.isActive) {
-            return res.status(401).json({
-                error: 'Invalid email or OTP',
-            });
-        }
+    const [user] = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        phone: users.phone,
+        userType: users.userType,
+        isActive: users.isActive,
+      })
+      .from(users)
+      .where(
+        isEmail
+          ? eq(users.email, identifier)
+          : eq(users.phone, identifier),
+      )
+      .limit(1);
 
-        await verifyOtp({
-            userId: user.id,
-            purpose: OTP_PURPOSE.LOGIN,
-            otp,
-        });
-        const { accessToken, refreshToken } =
-            await createLoginSession({
-                userId: user.id,
-                userType: user.userType,
-            });
-        res.cookie('refreshToken', refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 14 * 24 * 60 * 60 * 1000,
-        });
-
-        // Stop here for this step.
-        // We will add JWT + refresh-token logic next.
-        return res.status(200).json({
-            message: 'Login successful',
-            accessToken,
-        });
-    } catch (error) {
-        console.error('Verify OTP login error:', error);
-
-        return res.status(401).json({
-            error: 'Invalid or expired OTP',
-        });
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        error: 'Invalid email/phone or OTP',
+      });
     }
+
+    await verifyOtp({
+      userId: user.id,
+      purpose: OTP_PURPOSE.LOGIN,
+      otp,
+    });
+
+    const { accessToken, refreshToken } =
+      await createLoginSession({
+        userId: user.id,
+        userType: user.userType,
+      });
+
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 14 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.status(200).json({
+      message: 'Login successful',
+      accessToken,
+    });
+  } catch (error) {
+    console.error('Verify OTP login error:', error);
+
+    return res.status(401).json({
+      error: 'Invalid or expired OTP',
+    });
+  }
 };

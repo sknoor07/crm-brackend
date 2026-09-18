@@ -192,7 +192,7 @@ export const getjobdetailswithestimatedquote = async (req: Request<{ id: string 
     const items = await db
       .select()
       .from(jobItems)
-      .where(eq(jobItems.jobId, jobId));
+      .where(and(eq(jobItems.jobId, jobId),eq(jobItems.currentStatus,"transport_visit_in_progress")));
 
     const [latestQuote] = await db
       .select()

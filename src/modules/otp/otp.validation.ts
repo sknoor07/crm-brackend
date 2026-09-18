@@ -13,16 +13,30 @@ export const resetPasswordSchema = z.object({
   resetToken: z.string().min(1, 'Reset token is required'),
   password: z.string().min(8, 'Password must be at least 8 characters long'),
 });
+
+export const identifierSchema = z
+  .string()
+  .trim()
+  .refine(
+    (value) =>
+      z.string().email().safeParse(value).success ||
+      /^[6-9]\d{9}$/.test(value),
+    {
+      message: "Enter a valid email or 10-digit phone number",
+    },
+  );
+
 export const requestOtpLoginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  identifier: identifierSchema,
 });
 
 export const verifyOtpLoginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  identifier: identifierSchema,
+
   otp: z
     .string()
-    .length(6, 'OTP must be 6 digits')
-    .regex(/^\d+$/, 'OTP must contain only numbers'),
+    .length(6, "OTP must be 6 digits")
+    .regex(/^\d+$/, "OTP must contain only numbers"),
 });
 
 export type RequestOtpLoginInput = z.infer<
@@ -32,7 +46,6 @@ export type RequestOtpLoginInput = z.infer<
 export type VerifyOtpLoginInput = z.infer<
   typeof verifyOtpLoginSchema
 >;
-
 
 export type ForgotPasswordInput = z.infer<
   typeof forgotPasswordSchema

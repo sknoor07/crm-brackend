@@ -50,7 +50,7 @@ export const getJobsWaitingForCSApproval = async (req: Request, res: Response,) 
   }
 };
 
-interface CustomerParams extends ParamsDictionary{
+interface CustomerParams extends ParamsDictionary {
   id: string;
 }
 // after search for customer clik on customer so this functions return the customer with profile and all jobs submitted by customer
@@ -318,7 +318,7 @@ export const getJobsWaitingToBeClosed = async (req: Request, res: Response,) => 
       .leftJoin(customerProfiles, eq(customerProfiles.userId, users.id,))
       .leftJoin(jobItems, eq(jobItems.jobId, jobs.id,),)
 
-      .where(and(or(eq(jobs.currentStatus, 'delivered',),eq(jobs.currentStatus,'repair_completed')),exists(hasItems),notExists(hasNonFinalItems)));
+      .where(and(or(eq(jobs.currentStatus, 'delivered',), eq(jobs.currentStatus, 'repair_completed')), exists(hasItems), notExists(hasNonFinalItems)));
 
     /**
      * Group the JOIN result.
@@ -507,7 +507,7 @@ export const closeJobRequest = async (
     // --------------------------------------------------
 
     if (
-      !canTransitionJob(job.currentStatus,'closed')) {
+      !canTransitionJob(job.currentStatus, 'closed')) {
       return res.status(400).json({
         status: 'error',
         error:
@@ -599,7 +599,7 @@ export const closeJobRequest = async (
             .select()
             .from(jobs)
             .where(
-              and(eq(jobs.id, jobId),or(eq(jobs.currentStatus, 'delivered'),eq(jobs.currentStatus, 'repair_completed')))
+              and(eq(jobs.id, jobId), or(eq(jobs.currentStatus, 'delivered'), eq(jobs.currentStatus, 'repair_completed')))
             )
             .limit(1);
 
@@ -875,7 +875,7 @@ export const approveJobByCS = async (req: Request<{}, {}, CSApproveJobAndJobItem
     });
   }
 };
-interface JobParams extends ParamsDictionary{
+interface JobParams extends ParamsDictionary {
   id: string;
 }
 
@@ -1657,6 +1657,8 @@ export const generateFinalQuote = async (
 
 
 
+
+
 //done
 
 
@@ -1670,7 +1672,29 @@ export const generateFinalQuote = async (
 
 
 
+export const getQuoteForAJob = async (req: Request, res: Response)=>{
+  const jobId = req.params.id as string;
+  if (!jobId) {
+    res.status(400).json({ message: "Job Id Not found" })
+    const job = await db.select().from(jobs).where(eq(jobs.id, jobId))
+  }
+  try {
+    if (!jobId) {
+      res.status(400).json({ message: "Job Id Not found" })
+    }
 
+    const job = await db.select().from(jobs).where(eq(jobs.id, jobId))
+    if (!job) {
+      res.status(500).json({ message: "No job Found" })
+    }
+    const result = await db.select().from(jobQuotes).leftJoin(jobItemQuotes, eq(jobQuotes.id, jobItemQuotes.jobQuoteId)).leftJoin(jobItemQuoteLines, eq(jobItemQuotes.id, jobItemQuoteLines.quoteId)).where(eq( jobQuotes.jobId,jobId));
+    res.status(200).json({ message: "quote fecth successfully" });
+
+  }
+  catch (err) {
+    res.status(500).json({ message: "problem in fecthing quote" });
+  }
+}
 
 
 
