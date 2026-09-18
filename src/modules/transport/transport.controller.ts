@@ -315,7 +315,7 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
       },
 
     );
-    return res.status(200).json({ message: 'Transport person assigned successfully.', job: result.job, items: result.items, });
+    return res.status(200).json({ status:"success",message: 'Transport person assigned successfully.'});
 
 
   } catch (error) {

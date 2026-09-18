@@ -21,11 +21,21 @@ dotenv.config();
 const app: Express = express();
 const PORT = process.env.PORT || 5000;
 
+const clientUrl = process.env.CUSTOMER_FRONTEND_URL;
+const CRMUrl= process.env.EMPLOYEE_FRONTEND_URL
+if (!clientUrl) {
+  throw new Error('CLIENT_URL is not configured');
+}
+
+if(!CRMUrl){
+  throw new Error ('CRM_URL is not configured')
+}
+
 app.use(helmet());
 app.use(cors({
-    origin: process.env.FRONTEND_URL,
+    origin: [clientUrl, CRMUrl],
     credentials: true,
-  }));
+}));
 app.use(express.json());
 
 
