@@ -260,7 +260,7 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
     if (itemsWaitingForTransport.length === 0) {
       return res.status(400).json({ error: 'Job has no items waiting for transport.', });
     }
-
+    const[transportPersonDetails]= await db.select({email:users.email,fName:employeeProfiles.firstName,lName:employeeProfiles.lastName}).from(users).leftJoin(employeeProfiles,eq(users.id,employeeProfiles.userId)).where(eq(users.id,transportPersonId)).limit(1);
     /* -----------------------------------------------------
        Assign transport person
        ----------------------------------------------------- */
@@ -272,7 +272,8 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
           previousStatus: job.currentStatus,
           newStatus: 'pending_visit',
           changedBy: transportManagerId,
-          note: comment.trim(),
+          note: `Job Assigned to pickup Person i.e. ${transportPersonDetails.email}, ${transportPersonDetails.fName, transportPersonDetails.lName}`,
+          comment:comment.trim()??"",
           existingTx: tx,
 
 

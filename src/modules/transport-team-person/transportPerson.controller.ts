@@ -129,7 +129,7 @@ export const getAssignedJobs = async (req: Request, res: Response,) => {
       }
 
       // Add the current device/item to the jobItems array
-      if (row.jobItem) {
+      if (row.jobItem && row.jobItem.currentStatus==='transport_visit_in_progress') {
         jobsMap.get(jobId).jobItems.push(row.jobItem);
       }
     }
@@ -588,8 +588,8 @@ export const completeTransportInspection = async (
             changedBy:
               transportPersonId,
 
-            note:
-              jobNote,
+            note:"Order sent to CS team for quote Generation",
+            comment:comment?.trim()??"No Comment by Transport person",
 
             updateJob:
               async (

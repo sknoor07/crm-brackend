@@ -18,7 +18,7 @@ export const jobs = pgTable('jobs', {
   customerId: uuid('customer_id').references(() => users.id).notNull(),
 
   currentStatus: jobSummaryStatus('current_status',).notNull().default('in_progress'),
-  paymentConfirmed: boolean('payment_confirmed',).default(false),
+  paymentConfirmed: boolean('payment_confirmed',).default(false).notNull(),
 
   isApprovedByCS: boolean('is_approved_by_cs').default(false),
 

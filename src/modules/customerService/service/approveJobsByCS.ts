@@ -530,8 +530,9 @@ export const rejectJobByCS = async (
 
     changedBy,
 
-    note:
-      comment.trim(),
+    note:"Order Rejected By CS Team",
+
+    comment:comment.trim()??"",
 
     existingTx:
       tx,
@@ -606,8 +607,8 @@ export const approveJobByCS = async (
 
     changedBy,
 
-    note:
-      comment.trim(),
+    note:"Job approved By CS and waiting for Transport Manager Action",
+    comment:comment.trim()??"",
 
     existingTx:
       tx,

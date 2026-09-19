@@ -1,8 +1,9 @@
 import { Router } from 'express';
 
 import {
-  createJobByCS,
-  getDeviceCategories,
+  // createJobByCS,
+  // getDeviceCategories,
+  getJobWithItems,
 } from './jobs.controller.js';
 
 
@@ -18,7 +19,7 @@ import {
   requireAuth,
   requireRole,
 } from '../../shared/middleware/auth.js';
-import { getJobById, getJobStatusHistory, listJobs } from './read.controller.js';
+import { getJobDetailedStatusHistory, getJobItemDetailedStatusHistory, listJobs } from './read.controller.js';
 
 const router = Router();
 
@@ -38,43 +39,53 @@ router.get(
   listJobs,
 );
 
-router.get(
-  '/device-categories',
-  requireRole([
-    'admin',
-    'customer_service',
-    'customer',
-  ]),
-  getDeviceCategories,
-);
+// router.get(
+//   '/device-categories',
+//   requireRole([
+//     'admin',
+//     'customer_service',
+//     'customer',
+//   ]),
+//   getDeviceCategories,
+// );
 
 router.get(
-  '/:jobId/status-history',
+  '/jobs-with-items',
   requireRole([
-    'admin',
-    'customer_service',
-    'transport_manager',
-    'transport_team_person',
-    'repair_manager',
-    'repair_person',
-    'customer',
+    'admin','customer_service',
   ]),
-  getJobStatusHistory,
-);
+  getJobWithItems,
+)
 
 router.get(
-  '/:jobId',
+  '/:jobId/detailed-job-status-history',
   requireRole([
     'admin',
     'customer_service',
-    'transport_manager',
-    'transport_team_person',
-    'repair_manager',
-    'repair_person',
-    'customer',
   ]),
-  getJobById,
+  getJobDetailedStatusHistory,
 );
+router.get(
+  '/:jobItemId/detailed-item-status-history',
+  requireRole([
+    'admin',
+    'customer_service',
+  ]),
+  getJobItemDetailedStatusHistory,
+);
+// router.get(
+//   '/:jobId',
+//   requireRole([
+//     'admin',
+//     'customer_service',
+//     'transport_manager',
+//     'transport_team_person',
+//     'repair_manager',
+//     'repair_person',
+//     'customer',
+//   ]),
+//   getJobById,
+// );
 
 router.get(
   '/',
@@ -90,14 +101,14 @@ router.get(
   listJobs,
 );
 
-router.post(
-  '/',
-  requireRole([
-    'admin',
-    'customer_service',
-  ]),
-  validateRequest(createJobSchema),
-  createJobByCS,
-);
+// router.post(
+//   '/',
+//   requireRole([
+//     'admin',
+//     'customer_service',
+//   ]),
+//   validateRequest(createJobSchema),
+//   createJobByCS,
+// );
 
 export default router;

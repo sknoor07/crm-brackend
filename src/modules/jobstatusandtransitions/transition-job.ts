@@ -29,6 +29,7 @@ export interface TransitionJobParams<T> {
   changedBy: string;
 
   note?: string;
+  comment?:string;
 
   updateJob: (
     tx: DbTransaction,
@@ -48,6 +49,7 @@ export const transitionJob = async <T>({
   newStatus,
   changedBy,
   note,
+  comment,
   updateJob,
   existingTx,
 }: TransitionJobParams<T>): Promise<T> => {
@@ -128,7 +130,7 @@ export const transitionJob = async <T>({
         userId: changedBy,
 
         comment:
-          note ??
+          comment ??
           `Job status changed from ${effectivePreviousStatus} to ${newStatus}`,
       });
 

@@ -118,7 +118,7 @@ export const jobItems = pgTable('job_items', {
   ),
 
   isWarrantyClaim: boolean('is_warranty_claim')
-    .default(false),
+    .default(false).notNull(),
 
   originalJobItemId: uuid('original_job_item_id'),
 

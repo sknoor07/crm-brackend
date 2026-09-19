@@ -94,6 +94,12 @@ router.get('/pending-final-quotes',
   getPendingFinalQuotes,
 );
 
+router.get(
+  "/jobs/:jobId/quote",
+  requireRole(csRoles),
+  getQuoteForAJob,
+);
+
 router.patch('/final-quote',
   requireRole(csRoles),
   validateRequest(generateFinalQuoteSchema,),

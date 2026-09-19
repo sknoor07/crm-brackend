@@ -191,16 +191,16 @@ export const createCustomerJob = async (
       // 2. JOB COMMENT
       // --------------------------------------------------
 
-      if (comment?.trim()) {
-        await tx
-          .insert(jobComments)
-          .values({
-            jobId: job.id,
-            jobItemId: null,
-            userId: customerId,
-            comment: comment.trim(),
-          });
-      }
+      // if (comment?.trim()) {
+      //   await tx
+      //     .insert(jobComments)
+      //     .values({
+      //       jobId: job.id,
+      //       jobItemId: null,
+      //       userId: customerId,
+      //       comment: comment.trim(),
+      //     });
+      // }
 
 
       // --------------------------------------------------
@@ -233,7 +233,8 @@ export const createCustomerJob = async (
         previousStatus: 'created',
         newStatus: 'in_progress',
         changedBy: customerId,
-        note: 'Job submitted and moved to in progress',
+        note: 'Job submitted and moved to verification at CS team',
+        comment:comment?.trim() ?? "",
         existingTx: tx,
 
         updateJob: async (tx) => {
@@ -850,10 +851,7 @@ export const respondToQuote = async (
 
 
 
-export const getCustomerPendingQuotes = async (
-  req: Request,
-  res: Response,
-) => {
+export const getCustomerPendingQuotes = async (req: Request,res: Response,) => {
   try {
     const customerId = req.user?.userId;
 

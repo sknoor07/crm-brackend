@@ -82,3 +82,66 @@ export const createJobSchema = z.object({
 
 export type CreateJobInput =
   z.infer<typeof createJobSchema>;
+
+  
+
+export const jobSchema = z.object({
+  id: z.string().uuid(),
+  jobNumber: z.string(),
+  customerId: z.string().uuid(),
+  currentStatus: z.string(),
+  paymentConfirmed: z.boolean(),
+});
+
+export const jobItemSchema = z.object({
+  id: z.string().uuid(),
+  jobId: z.string().uuid(),
+
+  deviceName: z.string(),
+  deviceCategory: z.string(),
+  deviceSerialNumber: z.string().nullable(),
+
+  issueDescription: z.string(),
+  repairLocation: z.enum(["customer_site", "inlab"]).nullable(),
+
+  currentStatus: z.string(),
+
+  assignedRepairPersonId: z.string().uuid().nullable(),
+
+  requestedComponents: z.unknown().nullable(),
+  diagnosisNotes: z.string().nullable(),
+  repairNotes: z.string().nullable(),
+
+  isWarrantyClaim: z.boolean(),
+
+  estimatedComponentsCost: z.string().nullable(),
+  finalComponentsCost: z.string().nullable(),
+  baseRepairCost: z.string().nullable(),
+  serviceChargeApplied: z.string().nullable(),
+});
+
+export type JobSchema =
+  z.infer<typeof jobSchema>;
+
+  export type JobItemSchema =
+  z.infer<typeof jobItemSchema>;
+
+  export const jobWithJobItemResponse = z.object({
+    job:jobSchema,
+    jobItems:z.array(jobItemSchema),
+  })
+
+    export type JobWithJobItemResponse =
+  z.infer<typeof jobWithJobItemResponse>;
+
+  export const jobWithJobItemsResponse = z.array(
+  jobWithJobItemResponse
+);
+
+export type JobWithJobItemsResponse =
+  z.infer<typeof jobWithJobItemsResponse>;
+
+export type GetJobWithItemsResponse = {
+  message: string;
+  result: JobWithJobItemResponse[];
+};
