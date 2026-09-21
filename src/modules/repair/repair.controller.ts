@@ -800,107 +800,107 @@ export const requestFinalQuote = async (
  *            ↓
  * diagnosis_in_progress
  */
-export const startDiagnosis = async (req: Request<{}, {}, StartDiagnosisInput>, res: Response,) => {
-  try {
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
+// export const startDiagnosis = async (req: Request<{}, {}, StartDiagnosisInput>, res: Response,) => {
+//   try {
+//     const {
+//       jobItemId,
+//       comment,
+//     } = req.body;
 
-    const userId =
-      req.user?.userId;
+//     const userId =
+//       req.user?.userId;
 
-    if (!userId) {
-      return res.status(401).json({
-        error:
-          'Authenticated user not found',
-      });
-    }
+//     if (!userId) {
+//       return res.status(401).json({
+//         error:
+//           'Authenticated user not found',
+//       });
+//     }
 
-    const result =
-      await getJobItemWithJob(jobItemId);
+//     const result =
+//       await getJobItemWithJob(jobItemId);
 
-    if (!result) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
+//     if (!result) {
+//       return res.status(404).json({
+//         error: 'Job item not found',
+//       });
+//     }
 
-    const {
-      item,
-    } = result;
+//     const {
+//       item,
+//     } = result;
 
-    if (
-      !isRepairPersonAuthorized(
-        item,
-        userId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error:
-          'You are not authorized to work on this repair item.',
-      });
-    }
+//     if (
+//       !isRepairPersonAuthorized(
+//         item,
+//         userId,
+//         req.user?.roles,
+//       )
+//     ) {
+//       return res.status(403).json({
+//         error:
+//           'You are not authorized to work on this repair item.',
+//       });
+//     }
 
-    if (
-      item.currentStatus !==
-      'assigned_to_repair_person'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot start diagnosis from '${item.currentStatus}'.`,
-      });
-    }
+//     if (
+//       item.currentStatus !==
+//       'assigned_to_repair_person'
+//     ) {
+//       return res.status(400).json({
+//         error:
+//           `Cannot start diagnosis from '${item.currentStatus}'.`,
+//       });
+//     }
 
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'diagnosis_in_progress',
+//     const updatedItem =
+//       await updateJobItemWithStatusTransition(
+//         item.id,
+//         item.currentStatus,
+//         'diagnosis_in_progress',
 
-        async (
-          tx: Parameters<
-            Parameters<typeof db.transaction>[0]
-          >[0],
-        ) => {
-          const [updated] = await tx
-            .update(jobItems)
-            .set({
-              updatedAt:
-                new Date(),
-            })
-            .where(
-              eq(
-                jobItems.id,
-                item.id,
-              ),
-            )
-            .returning();
+//         async (
+//           tx: Parameters<
+//             Parameters<typeof db.transaction>[0]
+//           >[0],
+//         ) => {
+//           const [updated] = await tx
+//             .update(jobItems)
+//             .set({
+//               updatedAt:
+//                 new Date(),
+//             })
+//             .where(
+//               eq(
+//                 jobItems.id,
+//                 item.id,
+//               ),
+//             )
+//             .returning();
 
-          return updated;
-        },
+//           return updated;
+//         },
 
-        userId,
-        comment,
-      );
+//         userId,
+//         comment,
+//       );
 
-    return res.status(200).json({
-      message:
-        'Diagnosis started successfully.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Start diagnosis error:',
-      error,
-    );
+//     return res.status(200).json({
+//       message:
+//         'Diagnosis started successfully.',
+//       item: updatedItem,
+//     });
+//   } catch (error) {
+//     console.error(
+//       'Start diagnosis error:',
+//       error,
+//     );
 
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
+//     return res.status(500).json({
+//       error: 'Internal server error',
+//     });
+//   }
+// };
 
 
 /**
@@ -1178,127 +1178,127 @@ export const startDiagnosis = async (req: Request<{}, {}, StartDiagnosisInput>, 
  * Customer approval must already have
  * happened through the CS workflow.
  */
-export const startRepair = async (
-  req: Request<
-    {},
-    {},
-    StartRepairInput
-  >,
-  res: Response,
-) => {
-  try {
-    const {
-      jobItemId,
-      comment,
-    } = req.body;
+// export const startRepair = async (
+//   req: Request<
+//     {},
+//     {},
+//     StartRepairInput
+//   >,
+//   res: Response,
+// ) => {
+//   try {
+//     const {
+//       jobItemId,
+//       comment,
+//     } = req.body;
 
-    const userId =
-      req.user?.userId;
+//     const userId =
+//       req.user?.userId;
 
-    if (!userId) {
-      return res.status(401).json({
-        error:
-          'Authenticated user not found',
-      });
-    }
+//     if (!userId) {
+//       return res.status(401).json({
+//         error:
+//           'Authenticated user not found',
+//       });
+//     }
 
-    const result =
-      await getJobItemWithJob(jobItemId);
+//     const result =
+//       await getJobItemWithJob(jobItemId);
 
-    if (!result) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
+//     if (!result) {
+//       return res.status(404).json({
+//         error: 'Job item not found',
+//       });
+//     }
 
-    const {
-      item,
-    } = result;
+//     const {
+//       item,
+//     } = result;
 
-    if (
-      !isRepairPersonAuthorized(
-        item,
-        userId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error:
-          'You are not authorized to repair this item.',
-      });
-    }
+//     if (
+//       !isRepairPersonAuthorized(
+//         item,
+//         userId,
+//         req.user?.roles,
+//       )
+//     ) {
+//       return res.status(403).json({
+//         error:
+//           'You are not authorized to repair this item.',
+//       });
+//     }
 
-    if (
-      item.currentStatus !==
-      'repair_authorized'
-    ) {
-      return res.status(400).json({
-        error:
-          `Repair cannot start from '${item.currentStatus}'. Customer approval is required first.`,
-      });
-    }
+//     if (
+//       item.currentStatus !==
+//       'repair_authorized'
+//     ) {
+//       return res.status(400).json({
+//         error:
+//           `Repair cannot start from '${item.currentStatus}'. Customer approval is required first.`,
+//       });
+//     }
 
-    /*
-     * This module handles lab repairs.
-     *
-     * Onsite repair is handled by the
-     * Transport Person workflow.
-     */
-    if (item.repairLocation !== 'lab') {
-      return res.status(400).json({
-        error:
-          'This endpoint is only for lab repairs.',
-      });
-    }
+//     /*
+//      * This module handles lab repairs.
+//      *
+//      * Onsite repair is handled by the
+//      * Transport Person workflow.
+//      */
+//     if (item.repairLocation !== 'lab') {
+//       return res.status(400).json({
+//         error:
+//           'This endpoint is only for lab repairs.',
+//       });
+//     }
 
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'repair_in_progress',
+//     const updatedItem =
+//       await updateJobItemWithStatusTransition(
+//         item.id,
+//         item.currentStatus,
+//         'repair_in_progress',
 
-        async (
-          tx: Parameters<
-            Parameters<typeof db.transaction>[0]
-          >[0],
-        ) => {
-          const [updated] = await tx
-            .update(jobItems)
-            .set({
-              updatedAt:
-                new Date(),
-            })
-            .where(
-              eq(
-                jobItems.id,
-                item.id,
-              ),
-            )
-            .returning();
+//         async (
+//           tx: Parameters<
+//             Parameters<typeof db.transaction>[0]
+//           >[0],
+//         ) => {
+//           const [updated] = await tx
+//             .update(jobItems)
+//             .set({
+//               updatedAt:
+//                 new Date(),
+//             })
+//             .where(
+//               eq(
+//                 jobItems.id,
+//                 item.id,
+//               ),
+//             )
+//             .returning();
 
-          return updated;
-        },
+//           return updated;
+//         },
 
-        userId,
-        comment,
-      );
+//         userId,
+//         comment,
+//       );
 
-    return res.status(200).json({
-      message:
-        'Repair started successfully.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Start repair error:',
-      error,
-    );
+//     return res.status(200).json({
+//       message:
+//         'Repair started successfully.',
+//       item: updatedItem,
+//     });
+//   } catch (error) {
+//     console.error(
+//       'Start repair error:',
+//       error,
+//     );
 
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
+//     return res.status(500).json({
+//       error: 'Internal server error',
+//     });
+//   }
+// };
 
 
 /**
@@ -1311,137 +1311,137 @@ export const startRepair = async (
  * The Repair Manager must inspect the item
  * before it can become ready for delivery.
  */
-export const completeRepair = async (
-  req: Request<
-    {},
-    {},
-    CompleteRepairInput
-  >,
-  res: Response,
-) => {
-  try {
-    const {
-      jobItemId,
-      repairNotes,
-      comment,
-    } = req.body;
+// export const completeRepair = async (
+//   req: Request<
+//     {},
+//     {},
+//     CompleteRepairInput
+//   >,
+//   res: Response,
+// ) => {
+//   try {
+//     const {
+//       jobItemId,
+//       repairNotes,
+//       comment,
+//     } = req.body;
 
-    const userId =
-      req.user?.userId;
+//     const userId =
+//       req.user?.userId;
 
-    if (!userId) {
-      return res.status(401).json({
-        error:
-          'Authenticated user not found',
-      });
-    }
+//     if (!userId) {
+//       return res.status(401).json({
+//         error:
+//           'Authenticated user not found',
+//       });
+//     }
 
-    const result =
-      await getJobItemWithJob(jobItemId);
+//     const result =
+//       await getJobItemWithJob(jobItemId);
 
-    if (!result) {
-      return res.status(404).json({
-        error: 'Job item not found',
-      });
-    }
+//     if (!result) {
+//       return res.status(404).json({
+//         error: 'Job item not found',
+//       });
+//     }
 
-    const {
-      item,
-    } = result;
+//     const {
+//       item,
+//     } = result;
 
-    if (
-      !isRepairPersonAuthorized(
-        item,
-        userId,
-        req.user?.roles,
-      )
-    ) {
-      return res.status(403).json({
-        error:
-          'You are not authorized to complete this repair.',
-      });
-    }
+//     if (
+//       !isRepairPersonAuthorized(
+//         item,
+//         userId,
+//         req.user?.roles,
+//       )
+//     ) {
+//       return res.status(403).json({
+//         error:
+//           'You are not authorized to complete this repair.',
+//       });
+//     }
 
-    if (
-      item.currentStatus !==
-      'repair_in_progress'
-    ) {
-      return res.status(400).json({
-        error:
-          `Cannot complete repair from '${item.currentStatus}'.`,
-      });
-    }
+//     if (
+//       item.currentStatus !==
+//       'repair_in_progress'
+//     ) {
+//       return res.status(400).json({
+//         error:
+//           `Cannot complete repair from '${item.currentStatus}'.`,
+//       });
+//     }
 
-    /*
-     * Only lab repairs go through
-     * Repair Manager inspection.
-     *
-     * Customer-site repair uses:
-     *
-     * repair_in_progress
-     *        ↓
-     * pending_cs_confirmation
-     *
-     * That workflow belongs to Transport Person.
-     */
-    if (item.repairLocation !== 'lab') {
-      return res.status(400).json({
-        error:
-          'This endpoint is only for lab repairs.',
-      });
-    }
+//     /*
+//      * Only lab repairs go through
+//      * Repair Manager inspection.
+//      *
+//      * Customer-site repair uses:
+//      *
+//      * repair_in_progress
+//      *        ↓
+//      * pending_cs_confirmation
+//      *
+//      * That workflow belongs to Transport Person.
+//      */
+//     if (item.repairLocation !== 'lab') {
+//       return res.status(400).json({
+//         error:
+//           'This endpoint is only for lab repairs.',
+//       });
+//     }
 
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus,
-        'pending_repair_manager_inspection',
+//     const updatedItem =
+//       await updateJobItemWithStatusTransition(
+//         item.id,
+//         item.currentStatus,
+//         'pending_repair_manager_inspection',
 
-        async (
-          tx: Parameters<
-            Parameters<typeof db.transaction>[0]
-          >[0],
-        ) => {
-          const [updated] = await tx
-            .update(jobItems)
-            .set({
-              repairNotes:
-                repairNotes || null,
+//         async (
+//           tx: Parameters<
+//             Parameters<typeof db.transaction>[0]
+//           >[0],
+//         ) => {
+//           const [updated] = await tx
+//             .update(jobItems)
+//             .set({
+//               repairNotes:
+//                 repairNotes || null,
 
-              updatedAt:
-                new Date(),
-            })
-            .where(
-              eq(
-                jobItems.id,
-                item.id,
-              ),
-            )
-            .returning();
+//               updatedAt:
+//                 new Date(),
+//             })
+//             .where(
+//               eq(
+//                 jobItems.id,
+//                 item.id,
+//               ),
+//             )
+//             .returning();
 
-          return updated;
-        },
+//           return updated;
+//         },
 
-        userId,
-        comment,
-      );
+//         userId,
+//         comment,
+//       );
 
-    return res.status(200).json({
-      message:
-        'Repair completed and sent for Repair Manager inspection.',
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      'Complete repair error:',
-      error,
-    );
+//     return res.status(200).json({
+//       message:
+//         'Repair completed and sent for Repair Manager inspection.',
+//       item: updatedItem,
+//     });
+//   } catch (error) {
+//     console.error(
+//       'Complete repair error:',
+//       error,
+//     );
 
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-};
+//     return res.status(500).json({
+//       error: 'Internal server error',
+//     });
+//   }
+// };
 
 
 /*
@@ -1651,127 +1651,4 @@ export const approveRepair = async (
  *
  * The same Repair Person remains assigned.
  */
-export const rejectRepairInspection =
-  async (
-    req: Request<
-      {},
-      {},
-      RejectRepairInspectionInput
-    >,
-    res: Response,
-  ) => {
-    try {
-      const {
-        jobItemId,
-        comment,
-      } = req.body;
-
-      const managerId =
-        req.user?.userId;
-
-      if (!managerId) {
-        return res.status(401).json({
-          error:
-            'Authenticated user not found',
-        });
-      }
-
-      const result =
-        await getJobItemWithJob(
-          jobItemId,
-        );
-
-      if (!result) {
-        return res.status(404).json({
-          error: 'Job item not found',
-        });
-      }
-
-      const {
-        item,
-        job,
-      } = result;
-
-      if (
-        !isRepairManagerAuthorized(
-          job,
-          managerId,
-          req.user?.roles,
-        )
-      ) {
-        return res.status(403).json({
-          error:
-            'You are not authorized to inspect this repair item.',
-        });
-      }
-
-      if (
-        item.currentStatus !==
-        'pending_repair_manager_inspection'
-      ) {
-        return res.status(400).json({
-          error:
-            `Cannot reject inspection from '${item.currentStatus}'.`,
-        });
-      }
-
-      /*
-       * We deliberately keep assignedRepairPersonId.
-       *
-       * Rejection means:
-       *
-       * "Repair needs more work."
-       *
-       * It does NOT mean:
-       *
-       * "Assign this item to another technician."
-       */
-      const updatedItem =
-        await updateJobItemWithStatusTransition(
-          item.id,
-          item.currentStatus,
-          'repair_in_progress',
-
-          async (
-            tx: Parameters<
-              Parameters<typeof db.transaction>[0]
-            >[0],
-          ) => {
-            const [updated] =
-              await tx
-                .update(jobItems)
-                .set({
-                  updatedAt:
-                    new Date(),
-                })
-                .where(
-                  eq(
-                    jobItems.id,
-                    item.id,
-                  ),
-                )
-                .returning();
-
-            return updated;
-          },
-
-          managerId,
-          comment,
-        );
-
-      return res.status(200).json({
-        message:
-          'Repair rejected during inspection. Item returned to Repair Person.',
-        item: updatedItem,
-      });
-    } catch (error) {
-      console.error(
-        'Reject repair inspection error:',
-        error,
-      );
-
-      return res.status(500).json({
-        error: 'Internal server error',
-      });
-    }
-  };
+// s

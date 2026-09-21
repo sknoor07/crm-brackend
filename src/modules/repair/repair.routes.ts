@@ -5,14 +5,14 @@ import {
   assignRepairPerson,
 
   getAssignedRepairItems,
-  startDiagnosis,
+  //startDiagnosis,
   requestFinalQuote,
-  startRepair,
-  completeRepair,
+ // startRepair,
+  //completeRepair,
 
   getPendingRepairInspections,
   approveRepair,
-  rejectRepairInspection,
+  //rejectRepairInspection,
   getAllRepairPersons,
 } from './repair.controller.js';
 
@@ -126,14 +126,14 @@ router.patch(
  *
  * PATCH /repair/reject-inspection
  */
-router.patch(
-  '/reject-inspection',
-  requireRole(repairManagerRoles),
-  validateRequest(
-    rejectRepairInspectionSchema,
-  ),
-  rejectRepairInspection,
-);
+// router.patch(
+//   '/reject-inspection',
+//   requireRole(repairManagerRoles),
+//   validateRequest(
+//     rejectRepairInspectionSchema,
+//   ),
+//   rejectRepairInspection,
+// );
 
 
 /*
@@ -177,14 +177,14 @@ router.get(
  *
  * PATCH /repair/start-diagnosis
  */
-router.patch(
-  '/start-diagnosis',
-  requireRole(repairPersonRoles),
-  validateRequest(
-    startDiagnosisSchema,
-  ),
-  startDiagnosis,
-);
+// router.patch(
+//   '/start-diagnosis',
+//   requireRole(repairPersonRoles),
+//   validateRequest(
+//     startDiagnosisSchema,
+//   ),
+//   startDiagnosis,
+// );
 
 
 /**
@@ -208,14 +208,14 @@ router.patch(
  *
  * PATCH /repair/start-repair
  */
-router.patch(
-  '/start-repair',
-  requireRole(repairPersonRoles),
-  validateRequest(
-    startRepairSchema,
-  ),
-  startRepair,
-);
+// router.patch(
+//   '/start-repair',
+//   requireRole(repairPersonRoles),
+//   validateRequest(
+//     startRepairSchema,
+//   ),
+//   startRepair,
+// );
 
 
 /**
@@ -224,14 +224,14 @@ router.patch(
  *
  * PATCH /repair/complete-repair
  */
-router.patch(
-  '/complete-repair',
-  requireRole(repairPersonRoles),
-  validateRequest(
-    completeRepairSchema,
-  ),
-  completeRepair,
-);
+// router.patch(
+//   '/complete-repair',
+//   requireRole(repairPersonRoles),
+//   validateRequest(
+//     completeRepairSchema,
+//   ),
+//   completeRepair,
+// );
 
 
 export default router;

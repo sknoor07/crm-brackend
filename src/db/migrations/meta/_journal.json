@@ -15,6 +15,13 @@
       "when": 1789546481385,
       "tag": "0001_rare_leo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789983819002,
+      "tag": "0002_organic_the_renegades",
+      "breakpoints": true
     }
   ]
 }

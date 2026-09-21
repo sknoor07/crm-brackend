@@ -43,11 +43,11 @@ export const allowedJobItemTransitions: Record<
 
   // Transport decides where the item goes
   transport_visit_in_progress: [
-    'delivered',
+
     'repair_rejected',
     'pending_final_quote',
     'pending_lab_receipt'
-  
+
   ],
 
   // Lab handover
@@ -71,7 +71,7 @@ export const allowedJobItemTransitions: Record<
     'assigned_to_repair_manager',
   ],
 
-  
+
   // Repair person
   assigned_to_repair_person: [
     'pending_final_quote',
@@ -89,8 +89,12 @@ export const allowedJobItemTransitions: Record<
   // Customer approval
   awaiting_customer_approval: [
     'assigned_to_repair_person',
-    'transport_visit_in_progress',
+    'repair_started',
     'pending_final_quote',
+  ],
+
+  repair_started: [
+    'delivered',
   ],
 
   // Repair manager inspection
@@ -111,7 +115,9 @@ export const allowedJobItemTransitions: Record<
   delivered: [],
 
   // Terminal
-  repair_rejected: [],
+  repair_rejected: [
+    "repair_rejected",
+  ],
 
   cancelled: [],
 };
@@ -133,19 +139,19 @@ export const updateJobItemWithStatusTransition = async <T>(
 ): Promise<T> => {
 
   // If previous status is null, treat the item as newly created.
-  const effectivePreviousStatus  = previousStatus ?? 'created';
+  const effectivePreviousStatus = previousStatus ?? 'created';
 
   // ------------------------------------------------
   // Validate transition
   // ------------------------------------------------
 
   if (
-    !allowedJobItemTransitions[effectivePreviousStatus ]?.includes(
+    !allowedJobItemTransitions[effectivePreviousStatus]?.includes(
       newStatus,
     )
   ) {
     throw new Error(
-      `Invalid job item status transition: ${effectivePreviousStatus } -> ${newStatus}`,
+      `Invalid job item status transition: ${effectivePreviousStatus} -> ${newStatus}`,
     );
   }
 
@@ -163,7 +169,7 @@ export const updateJobItemWithStatusTransition = async <T>(
     // Record status history
     await tx.insert(jobItemStatusHistory).values({
       jobItemId,
-      previousStatus:effectivePreviousStatus ,
+      previousStatus: effectivePreviousStatus,
       newStatus,
       changedBy,
       note,

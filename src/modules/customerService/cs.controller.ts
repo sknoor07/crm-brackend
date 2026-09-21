@@ -55,62 +55,62 @@ interface CustomerParams extends ParamsDictionary {
   id: string;
 }
 // after search for customer clik on customer so this functions return the customer with profile and all jobs submitted by customer
-export const seacrhCustomerDetailswithJob = async (
-  req: Request<CustomerParams>,
-  res: Response
-) => {
-  try {
-    const customerId = req.params.id;
+  export const seacrhCustomerDetailswithJob = async (
+    req: Request<CustomerParams>,
+    res: Response
+  ) => {
+    try {
+      const customerId = req.params.id;
 
-    if (!customerId) {
-      return res.status(400).json({ message: "Invalid customer ID", });
-    }
-
-    const rows = await db
-      .select()
-      .from(customerProfiles)
-      .leftJoin(jobs, eq(jobs.customerId, customerId))
-      .where(eq(customerProfiles.userId, customerId));
-
-
-    const customerMap = new Map<
-      string,
-      {
-        customerProfile: typeof rows[number]['customer_profiles'];
-        jobs: typeof rows[number]['jobs'][];
+      if (!customerId) {
+        return res.status(400).json({ message: "Invalid customer ID", });
       }
-    >();
 
-    for (const row of rows) {
-      const customer = row.customer_profiles;
-      const job = row.jobs;
+      const rows = await db
+        .select()
+        .from(customerProfiles)
+        .leftJoin(jobs, eq(jobs.customerId, customerId))
+        .where(eq(customerProfiles.userId, customerId));
 
-      if (!customer) continue;
 
-      const existingCustomer = customerMap.get(customer.userId);
+      const customerMap = new Map<
+        string,
+        {
+          customerProfile: typeof rows[number]['customer_profiles'];
+          jobs: typeof rows[number]['jobs'][];
+        }
+      >();
 
-      if (existingCustomer) {
-        if (job) existingCustomer.jobs.push(job);
-      } else {
-        customerMap.set(customer.userId, {
-          customerProfile: customer,
-          jobs: job ? [job] : [],
-        });
+      for (const row of rows) {
+        const customer = row.customer_profiles;
+        const job = row.jobs;
+
+        if (!customer) continue;
+
+        const existingCustomer = customerMap.get(customer.userId);
+
+        if (existingCustomer) {
+          if (job) existingCustomer.jobs.push(job);
+        } else {
+          customerMap.set(customer.userId, {
+            customerProfile: customer,
+            jobs: job ? [job] : [],
+          });
+        }
       }
+
+      const result = Array.from(customerMap.values());
+
+
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error(err);
+
+      return res.status(500).json({
+        message: "Failed to get customer details",
+      });
     }
-
-    const result = Array.from(customerMap.values());
-
-
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error(err);
-
-    return res.status(500).json({
-      message: "Failed to get customer details",
-    });
-  }
-};
+  };
 
 
 // search the custmomer 
@@ -680,10 +680,9 @@ export const closeJobRequest = async (
             changedBy:
               userId,
 
-            note:
-              closureReason ??
-              'Job closed successfully.',
+            note:`Job closed successfully by CS Perosn with Id ${req.user?.userId}.`,
 
+            comment:closureReason,
             existingTx:
               tx,
 

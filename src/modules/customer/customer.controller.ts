@@ -234,7 +234,7 @@ export const createCustomerJob = async (
         newStatus: 'in_progress',
         changedBy: customerId,
         note: 'Job submitted and moved to verification at CS team',
-        comment:comment?.trim() ?? "",
+        comment: comment?.trim() ?? "",
         existingTx: tx,
 
         updateJob: async (tx) => {
@@ -322,8 +322,8 @@ export const createCustomerJob = async (
 export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>) => {
   try {
     const customerId = req.user?.userId;
-    if(!customerId){
-      res.status(401).json({message:"user not authenticated"});
+    if (!customerId) {
+      res.status(401).json({ message: "user not authenticated" });
       return
     }
     const result = await db
@@ -370,7 +370,7 @@ export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>
       )
       .where(
         eq(jobs.customerId, customerId),
-      );
+      ).orderBy(desc(jobs.updatedAt));
 
     const jobsMap = new Map<string, CustomerJob>();
 
@@ -602,14 +602,16 @@ export const respondToQuote = async (
             await updateJobItemWithStatusTransition(
               item.jobItemId,
               item.currentStatus,
-              'pending_final_quote',
+              item.currentStatus !== "repair_rejected" ? 'pending_final_quote' : "repair_rejected",
               async (transaction) => {
                 const [result] =
                   await transaction
                     .update(jobItems)
                     .set({
                       currentStatus:
-                        'pending_final_quote',
+                        item.currentStatus === "repair_rejected"
+                          ? "repair_rejected"
+                          : "pending_final_quote",
 
                       isFinalQuoteApproved:
                         false,
@@ -663,6 +665,9 @@ export const respondToQuote = async (
       let hasOnsiteItem = false;
 
       for (const item of quotedItems) {
+        if (item.currentStatus === "repair_rejected") {
+          continue;
+        }
         const isCustomerSite =
           item.repairLocation === 'customer_site';
 
@@ -684,7 +689,7 @@ export const respondToQuote = async (
         }
 
         const newStatus = isCustomerSite
-          ? 'transport_visit_in_progress'
+          ? 'repair_started'
           : 'assigned_to_repair_person';
 
         const itemComment = isCustomerSite
@@ -757,9 +762,8 @@ export const respondToQuote = async (
           newStatus:
             'repair_in_progress',
           changedBy: userId,
-          note:
-            comment?.trim() ||
-            'Customer approved the final quote. Repair can now proceed.',
+          note: 'Customer approved the final quote. Repair can now proceed.',
+          comment: comment?.trim() || "",
           updateJob: async (transaction) => {
             const [updatedJob] =
               await transaction
@@ -851,7 +855,7 @@ export const respondToQuote = async (
 
 
 
-export const getCustomerPendingQuotes = async (req: Request,res: Response,) => {
+export const getCustomerPendingQuotes = async (req: Request, res: Response,) => {
   try {
     const customerId = req.user?.userId;
 
@@ -1182,12 +1186,12 @@ export const getCustomerPendingQuotes = async (req: Request,res: Response,) => {
 
 export const getCustomerProfile = async (req: Request, res: Response<{}, CustomerProfile>) => {
   try {
-    const userId= req.user?.userId;
-    if(!userId){
-      res.status(401).json({message:"auauthenticated user"});
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "auauthenticated user" });
       return
     }
-    const result = await db.select({ firstName: customerProfiles.firstName, lastName: customerProfiles.lastName, email: users.email, phoneNumber: users.phone, billingAddress:customerProfiles.billingAddress}).from(users).innerJoin(customerProfiles, eq(users.id, customerProfiles.userId)).where(eq(users.id,userId)).limit(1);
+    const result = await db.select({ firstName: customerProfiles.firstName, lastName: customerProfiles.lastName, email: users.email, phoneNumber: users.phone, billingAddress: customerProfiles.billingAddress }).from(users).innerJoin(customerProfiles, eq(users.id, customerProfiles.userId)).where(eq(users.id, userId)).limit(1);
     res.status(200).json({ message: "Profile Fetched Successfully", data: result });
   } catch (err) {
     res.status(404).json({ message: "Profiel cannot be fecthed" })
@@ -1224,7 +1228,7 @@ export const updateCustomerProfile = async (req: Request<{}, {}, CustomerProfile
           phone: data.phoneNumber,
           firstName: data.firstName,
           lastName: data.lastName,
-          billingAddress:data.billingAddress
+          billingAddress: data.billingAddress
         })
         .where(eq(customerProfiles.userId, userId))
         .returning();
@@ -1242,23 +1246,23 @@ export const updateCustomerProfile = async (req: Request<{}, {}, CustomerProfile
   }
 }
 
-export const updatePassword = async( req:Request<{},{},UpdatePassword>,res:Response)=>{
-  try{
-  const userId= req.user?.userId;
-    if(!userId){
-      res.status(401).json({message:"auauthenticated user"});
+export const updatePassword = async (req: Request<{}, {}, UpdatePassword>, res: Response) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "auauthenticated user" });
       return
     }
-  const {password}=req.body;
-  await db
-  .update(users)
-  .set({
-    passwordHash: await hashPassword(password),
-  })
-  .where(eq(users.id, userId))
-  .returning();
-  res.status(200).json({message:"Password Updated successfully"});
-  }catch(err){
-    res.status(500).json({message:"Interval Server Error Cannot update Passswor",error:err})
+    const { password } = req.body;
+    await db
+      .update(users)
+      .set({
+        passwordHash: await hashPassword(password),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    res.status(200).json({ message: "Password Updated successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Interval Server Error Cannot update Passswor", error: err })
   }
 }

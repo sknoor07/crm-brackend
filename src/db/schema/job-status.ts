@@ -84,6 +84,8 @@ export const jobItemStatusValues = [
   // Customer Approval
   'awaiting_customer_approval',
 
+  'repair_started',
+
   // Third-party Repair
   'third_party_repair',
 

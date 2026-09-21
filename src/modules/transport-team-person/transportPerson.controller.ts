@@ -4,6 +4,8 @@ import {
   asc,
   desc,
   eq,
+  inArray,
+  or,
 } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
@@ -108,13 +110,19 @@ export const getAssignedJobs = async (req: Request, res: Response,) => {
       .where(
         and(
           eq(jobs.assignedTransportTeamPersonId, transportPersonId,),
-          eq(jobs.currentStatus, 'pending_visit'),
+          or(eq(jobs.currentStatus, 'pending_visit'), eq(jobs.currentStatus, "repair_started")),
         )
 
       )
       .orderBy(desc(jobs.createdAt));;
 
     const jobsMap = new Map();
+    const allowedJobItemStatuses = [
+      "transport_visit_in_progress",
+      "repair_started",
+      "repair_rejected",
+      "cancelled",
+    ];
 
     for (const row of rawResults) {
       const jobId = row.job.id;
@@ -129,14 +137,13 @@ export const getAssignedJobs = async (req: Request, res: Response,) => {
       }
 
       // Add the current device/item to the jobItems array
-      if (row.jobItem && row.jobItem.currentStatus==='transport_visit_in_progress') {
+      if (row.jobItem && allowedJobItemStatuses.includes(row.jobItem.currentStatus)) {
         jobsMap.get(jobId).jobItems.push(row.jobItem);
       }
     }
 
     // Convert the Map back to a clean array
     const groupedJobs = Array.from(jobsMap.values());
-
     return res.status(200).json({
       jobs: groupedJobs,
     });
@@ -190,9 +197,18 @@ export const getjobdetailswithestimatedquote = async (req: Request<{ id: string 
       });
     }
     const items = await db
-      .select()
-      .from(jobItems)
-      .where(and(eq(jobItems.jobId, jobId),eq(jobItems.currentStatus,"transport_visit_in_progress")));
+  .select()
+  .from(jobItems)
+  .where(
+    and(
+      eq(jobItems.jobId, jobId),
+      inArray(jobItems.currentStatus, [
+        "transport_visit_in_progress",
+        "repair_started",
+       
+      ])
+    )
+  );
 
     const [latestQuote] = await db
       .select()
@@ -588,8 +604,8 @@ export const completeTransportInspection = async (
             changedBy:
               transportPersonId,
 
-            note:"Order sent to CS team for quote Generation",
-            comment:comment?.trim()??"No Comment by Transport person",
+            note: "Order sent to CS team for quote Generation",
+            comment: comment?.trim() ?? "No Comment by Transport person",
 
             updateJob:
               async (
@@ -824,7 +840,287 @@ export const completeTransportInspection = async (
   }
 };
 
+/**
+  * FINISH ONSITE REPAIR for a Job
+ */
+export const finishOnsiteRepair = async (req: Request<{}, {}, FinishOnsiteRepairInput>, res: Response,) => {
+  try {
+    const transportPersonId = getUserId(req);
 
+    const {
+      jobId,
+      comment,
+    } = req.body;
+
+    // --------------------------------------------------
+    // Find job assigned to this transport person
+    // --------------------------------------------------
+
+    const [job] = await db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(
+            jobs.assignedTransportTeamPersonId,
+            transportPersonId,
+          ),
+        ),
+      )
+      .limit(1);
+
+    if (!job) {
+      return res.status(404).json({
+        error:
+          'Job not found or not assigned to you.',
+      });
+    }
+
+    // --------------------------------------------------
+    // Job must be actively under repair
+    // --------------------------------------------------
+
+    if (job.currentStatus !== 'repair_started') {
+      return res.status(400).json({
+        error:
+          `Onsite repair cannot be completed when ` +
+          `job status is ${job.currentStatus}. ` +
+          `Job must be in 'repair_started' status.`,
+      });
+    }
+
+    // --------------------------------------------------
+    // Load all job items
+    // --------------------------------------------------
+
+    const existingItems = await db
+      .select()
+      .from(jobItems)
+      .where(
+        eq(jobItems.jobId, jobId),
+      );
+
+    if (existingItems.length === 0) {
+      return res.status(400).json({
+        error:
+          'This job has no items.',
+      });
+    }
+
+    // --------------------------------------------------
+    // Find onsite items currently being repaired
+    // --------------------------------------------------
+
+    const onsiteItems =
+      existingItems.filter(
+        (item) =>
+          item.repairLocation ===
+          'customer_site' &&
+          item.currentStatus ===
+          'repair_started' &&
+          item.onsiteRepairAuthorized === true,
+      );
+
+    if (onsiteItems.length === 0) {
+      return res.status(400).json({
+        error:
+          'There are no onsite repair items currently in progress.',
+      });
+    }
+
+    // --------------------------------------------------
+    // Prevent completing a job that still has
+    // another applicable item not ready for completion
+    // --------------------------------------------------
+
+    const applicableItems =
+      existingItems.filter(
+        (item) =>
+          item.currentStatus !==
+          'repair_rejected' &&
+          item.currentStatus !==
+          'cancelled' &&
+          item.currentStatus !==
+          'removed_from_quote',
+      );
+
+    const incompleteItems =
+      applicableItems.filter(
+        (item) =>
+          !(
+            item.repairLocation ===
+            'customer_site' &&
+            item.currentStatus ===
+            'repair_started'
+          ),
+      );
+
+    if (incompleteItems.length > 0) {
+      return res.status(400).json({
+        error:
+          'Onsite repair cannot be completed because not all applicable job items are ready for onsite completion.',
+        items: incompleteItems.map(
+          (item) => ({
+            jobItemId: item.id,
+            status:
+              item.currentStatus,
+            repairLocation:
+              item.repairLocation,
+          }),
+        ),
+      });
+    }
+
+    const jobComment =
+      comment?.trim() ||
+      'All onsite repairs completed successfully.';
+
+    // --------------------------------------------------
+    // Transaction
+    // --------------------------------------------------
+
+    const result =
+      await db.transaction(
+        async (tx) => {
+
+          // --------------------------------------------
+          // Update all onsite items
+          // --------------------------------------------
+
+          const updatedItems = [];
+
+          for (
+            const existingItem of onsiteItems
+          ) {
+            const updatedItem =
+              await updateJobItemWithStatusTransition(
+                existingItem.id,
+
+                existingItem.currentStatus,
+
+                'delivered',
+
+                async (
+                  transaction,
+                ) => {
+                  const [updated] =
+                    await transaction
+                      .update(jobItems)
+                      .set({
+                        currentStatus: 'delivered',
+
+                        repairFinishedOnsite: true,
+
+                        inlabRepairAuthorized: false,
+
+                        repairNotes:
+                          comment?.trim() || null,
+
+                        updatedAt: new Date(),
+                      })
+                      .where(
+                        eq(
+                          jobItems.id,
+                          existingItem.id,
+                        ),
+                      )
+                      .returning();
+
+                  return updated;
+                },
+
+                transportPersonId,
+
+                comment?.trim() ||
+                'Onsite repair completed successfully.',
+
+                tx,
+              );
+
+            updatedItems.push(
+              updatedItem,
+            );
+          }
+
+          // --------------------------------------------
+          // Job → repair_completed
+          // --------------------------------------------
+
+          const updatedJob =
+            await transitionJob({
+              jobId: job.id,
+
+              previousStatus:
+                job.currentStatus,
+
+              newStatus:
+                'repair_completed',
+
+              changedBy:
+                transportPersonId,
+
+              note:
+                "Repair Finished onsite",
+              comment: jobComment,
+
+              updateJob:
+                async (
+                  transaction,
+                ) => {
+                  const [updated] =
+                    await transaction
+                      .update(jobs)
+                      .set({
+                        currentStatus:
+                          'repair_completed',
+
+                        updatedAt:
+                          new Date(),
+                      })
+                      .where(
+                        eq(
+                          jobs.id,
+                          job.id,
+                        ),
+                      )
+                      .returning();
+
+                  return updated;
+                },
+
+              existingTx: tx,
+            });
+
+          return {
+            job: updatedJob,
+            items: updatedItems,
+          };
+        },
+      );
+
+    return res.status(200).json({
+      message:
+        'Onsite repair completed successfully.',
+
+      data: result,
+    });
+
+  } catch (error) {
+
+    console.error(
+      'Finish onsite repair error:',
+      error,
+    );
+
+    return res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Internal server error',
+    });
+  }
+};
 
 
 
@@ -846,6 +1142,9 @@ export const completeTransportInspection = async (
 
 
 
+
+
+//////////////////////////////////pending/////////////////////////////////////////
 
 
 
@@ -1025,286 +1324,7 @@ export const completeTransportInspection = async (
 //   }
 // };
 
-/**
-  * FINISH ONSITE REPAIR fo an Item
- */
-export const finishOnsiteRepair = async (req: Request<{}, {}, FinishOnsiteRepairInput>,res: Response,) => {
-  try {
-    const transportPersonId = getUserId(req);
 
-    const {
-      jobId,
-      comment,
-    } = req.body;
-
-    // --------------------------------------------------
-    // Find job assigned to this transport person
-    // --------------------------------------------------
-
-    const [job] = await db
-      .select()
-      .from(jobs)
-      .where(
-        and(
-          eq(jobs.id, jobId),
-          eq(
-            jobs.assignedTransportTeamPersonId,
-            transportPersonId,
-          ),
-        ),
-      )
-      .limit(1);
-
-    if (!job) {
-      return res.status(404).json({
-        error:
-          'Job not found or not assigned to you.',
-      });
-    }
-
-    // --------------------------------------------------
-    // Job must be actively under repair
-    // --------------------------------------------------
-
-    if (job.currentStatus !== 'repair_started') {
-      return res.status(400).json({
-        error:
-          `Onsite repair cannot be completed when ` +
-          `job status is ${job.currentStatus}. ` +
-          `Job must be in 'repair_started' status.`,
-      });
-    }
-
-    // --------------------------------------------------
-    // Load all job items
-    // --------------------------------------------------
-
-    const existingItems = await db
-      .select()
-      .from(jobItems)
-      .where(
-        eq(jobItems.jobId, jobId),
-      );
-
-    if (existingItems.length === 0) {
-      return res.status(400).json({
-        error:
-          'This job has no items.',
-      });
-    }
-
-    // --------------------------------------------------
-    // Find onsite items currently being repaired
-    // --------------------------------------------------
-
-    const onsiteItems =
-      existingItems.filter(
-        (item) =>
-          item.repairLocation ===
-          'customer_site' &&
-          item.currentStatus ===
-          'transport_visit_in_progress' &&
-          item.onsiteRepairAuthorized===true,
-      );
-
-    if (onsiteItems.length === 0) {
-      return res.status(400).json({
-        error:
-          'There are no onsite repair items currently in progress.',
-      });
-    }
-
-    // --------------------------------------------------
-    // Prevent completing a job that still has
-    // another applicable item not ready for completion
-    // --------------------------------------------------
-
-    const applicableItems =
-      existingItems.filter(
-        (item) =>
-          item.currentStatus !==
-          'repair_rejected' &&
-          item.currentStatus !==
-          'cancelled' &&
-          item.currentStatus !==
-          'removed_from_quote',
-      );
-
-    const incompleteItems =
-      applicableItems.filter(
-        (item) =>
-          !(
-            item.repairLocation ===
-            'customer_site' &&
-            item.currentStatus ===
-            'transport_visit_in_progress'
-          ),
-      );
-
-    if (incompleteItems.length > 0) {
-      return res.status(400).json({
-        error:
-          'Onsite repair cannot be completed because not all applicable job items are ready for onsite completion.',
-        items: incompleteItems.map(
-          (item) => ({
-            jobItemId: item.id,
-            status:
-              item.currentStatus,
-            repairLocation:
-              item.repairLocation,
-          }),
-        ),
-      });
-    }
-
-    const jobComment =
-      comment?.trim() ||
-      'All onsite repairs completed successfully.';
-
-    // --------------------------------------------------
-    // Transaction
-    // --------------------------------------------------
-
-    const result =
-      await db.transaction(
-        async (tx) => {
-
-          // --------------------------------------------
-          // Update all onsite items
-          // --------------------------------------------
-
-          const updatedItems = [];
-
-          for (
-            const existingItem of onsiteItems
-          ) {
-            const updatedItem =
-              await updateJobItemWithStatusTransition(
-                existingItem.id,
-
-                existingItem.currentStatus,
-
-                'delivered',
-
-                async (
-                  transaction,
-                ) => {
-                  const [updated] =
-                    await transaction
-                      .update(jobItems)
-                      .set({
-                        currentStatus: 'delivered',
-
-                        repairFinishedOnsite: true,
-
-                        inlabRepairAuthorized: false,
-
-                        repairNotes:
-                          comment?.trim() || null,
-
-                        updatedAt: new Date(),
-                      })
-                      .where(
-                        eq(
-                          jobItems.id,
-                          existingItem.id,
-                        ),
-                      )
-                      .returning();
-
-                  return updated;
-                },
-
-                transportPersonId,
-
-                comment?.trim() ||
-                'Onsite repair completed successfully.',
-
-                tx,
-              );
-
-            updatedItems.push(
-              updatedItem,
-            );
-          }
-
-          // --------------------------------------------
-          // Job → repair_completed
-          // --------------------------------------------
-
-          const updatedJob =
-            await transitionJob({
-              jobId: job.id,
-
-              previousStatus:
-                job.currentStatus,
-
-              newStatus:
-                'repair_completed',
-
-              changedBy:
-                transportPersonId,
-
-              note:
-                jobComment,
-
-              updateJob:
-                async (
-                  transaction,
-                ) => {
-                  const [updated] =
-                    await transaction
-                      .update(jobs)
-                      .set({
-                        currentStatus:
-                          'repair_completed',
-
-                        updatedAt:
-                          new Date(),
-                      })
-                      .where(
-                        eq(
-                          jobs.id,
-                          job.id,
-                        ),
-                      )
-                      .returning();
-
-                  return updated;
-                },
-
-              existingTx: tx,
-            });
-
-          return {
-            job: updatedJob,
-            items: updatedItems,
-          };
-        },
-      );
-
-    return res.status(200).json({
-      message:
-        'Onsite repair completed successfully.',
-
-      data: result,
-    });
-
-  } catch (error) {
-
-    console.error(
-      'Finish onsite repair error:',
-      error,
-    );
-
-    return res.status(500).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Internal server error',
-    });
-  }
-};
 // /**
 //  complete all job order and send for final quote
 //  */
