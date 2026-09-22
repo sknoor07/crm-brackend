@@ -25,10 +25,14 @@ export const jobQuotes = pgTable('job_quotes', {
         precision: 10,
         scale: 2,
     }).notNull(),
-    tax: decimal('tax', {
+    cgst: decimal('csgst', {
         precision: 10,
         scale: 2,
-    }).notNull(),
+    }),
+    sgst: decimal('sgst', {
+        precision: 10,
+        scale: 2,
+    }),
     totalAmount: decimal('total_amount', {
         precision: 10,
         scale: 2,

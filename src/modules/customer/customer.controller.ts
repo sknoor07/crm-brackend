@@ -3,7 +3,7 @@ import { desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../../config/database.js';
 
-import { jobs, jobItems, jobComments, deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes, jobItemQuoteLines, users, customerProfiles, userRoles, roles, } from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, deviceServiceCharges, jobItemStatusHistory, jobStatusHistory, jobQuotes, jobItemQuotes, jobItemQuoteLines, users, customerProfiles, userRoles, roles, invoices, } from '../../db/schema/index.js';
 
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 
@@ -336,6 +336,10 @@ export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>
         jobCurrentStatus: jobs.currentStatus,
         paymentConfirmed: jobs.paymentConfirmed,
         jobCreatedAt: jobs.createdAt,
+        invoiceId: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        invoiceStatus: invoices.status,
+        invoicePdfFileName: invoices.pdfFileName,
 
         // -------------------------
         // Job Item
@@ -367,6 +371,9 @@ export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>
       .leftJoin(
         jobItems,
         eq(jobItems.jobId, jobs.id),
+      ).leftJoin(
+        invoices,
+        eq(invoices.jobId, jobs.id),
       )
       .where(
         eq(jobs.customerId, customerId),
@@ -386,6 +393,17 @@ export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>
           currentStatus: row.jobCurrentStatus,
           paymentConfirmed: row.paymentConfirmed,
           createdAt: row.jobCreatedAt,
+          invoice: row.invoiceId
+            ? {
+              id: row.invoiceId,
+              invoiceNumber:
+                row.invoiceNumber!,
+              status:
+                row.invoiceStatus!,
+              pdfFileName:
+                row.invoicePdfFileName,
+            }
+            : null,
           items: [],
         });
       }
@@ -1150,8 +1168,8 @@ export const getCustomerPendingQuotes = async (req: Request, res: Response,) => 
               quote.serviceCharge,
             discount:
               quote.discount,
-            tax:
-              quote.tax,
+            cgst:quote.cgst,
+            sgst:quote.sgst,
             totalAmount:
               quote.totalAmount,
             createdByUserId:

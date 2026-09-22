@@ -1,11 +1,12 @@
 import { and, asc, desc, eq, exists, ilike, inArray, notExists, or, sql } from 'drizzle-orm';
 import { db } from '../../config/database.js';
-import { jobs, jobItems, jobComments, jobStatusHistory, jobClosures, jobItemQuotes, jobItemQuoteLines, jobItemStatusHistory, users, customerProfiles, jobQuotes, } from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, jobStatusHistory, jobClosures, jobItemQuotes, jobItemQuoteLines, jobItemStatusHistory, users, customerProfiles, jobQuotes, invoices, } from '../../db/schema/index.js';
 import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
 import { insertJobItemQuoteWithLines } from '../jobs/quote-components.js';
 import { calculateServiceCharge, processCSJobApproval } from './service/approveJobsByCS.js';
 import { canTransitionJob } from '../jobstatusandtransitions/status-history.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
+import { createInvoiceForJob, generateAndStoreInvoicePdf } from '../invoice/invoice.service.js';
 // Get All Jobs which are applied by customer and pending for approval at cs
 export const getJobsWaitingForCSApproval = async (req, res) => {
     try {
@@ -321,6 +322,10 @@ export const closeJobRequest = async (req, res) => {
         // delivered
         // OR
         // repair_rejected
+        // OR
+        // removed_from_quote
+        // OR
+        // cancelled
         // --------------------------------------------------
         const nonFinalItems = items.filter((item) => item.currentStatus !== 'delivered' &&
             item.currentStatus !== 'repair_rejected' &&
@@ -377,19 +382,13 @@ export const closeJobRequest = async (req, res) => {
             // JOB TRANSITION
             //
             // delivered -> closed
-            //
-            // transitionJob handles:
-            //
-            // 1. jobs update
-            // 2. jobStatusHistory
-            // 3. jobComments
             // --------------------------------------------------
             const updatedJob = await transitionJob({
                 jobId,
                 previousStatus: currentJob.currentStatus,
                 newStatus: 'closed',
                 changedBy: userId,
-                note: `Job closed successfully by CS Perosn with Id ${req.user?.userId}.`,
+                note: `Job closed successfully by CS Person with Id ${userId}.`,
                 comment: closureReason,
                 existingTx: tx,
                 updateJob: (tx) => tx
@@ -403,9 +402,6 @@ export const closeJobRequest = async (req, res) => {
             });
             // --------------------------------------------------
             // JOB CLOSURE
-            //
-            // This is NOT part of the generic transition
-            // helper because it is specific to closing.
             // --------------------------------------------------
             const [closure] = await tx
                 .insert(jobClosures)
@@ -421,6 +417,56 @@ export const closeJobRequest = async (req, res) => {
                 closure,
             };
         });
+        // ==================================================
+        // INVOICE GENERATION
+        //
+        // IMPORTANT:
+        // This happens AFTER the close transaction commits.
+        // ==================================================
+        let invoice = null;
+        try {
+            // --------------------------------------------------
+            // 1. Create invoice snapshot
+            //
+            // This reads the final quote and creates:
+            //
+            // invoices
+            // invoice_items
+            // --------------------------------------------------
+            invoice =
+                await createInvoiceForJob(jobId);
+            // --------------------------------------------------
+            // 2. Generate PDF
+            // 3. Upload PDF to Neon Object Storage
+            // 4. Update invoice record
+            // --------------------------------------------------
+            invoice =
+                await generateAndStoreInvoicePdf(invoice.id);
+        }
+        catch (invoiceError) {
+            console.error('Invoice generation failed after job closure:', invoiceError);
+            // --------------------------------------------------
+            // IMPORTANT:
+            //
+            // Do NOT fail the job closure because invoice
+            // generation failed.
+            //
+            // The job is already closed.
+            // The invoice can be retried later.
+            // --------------------------------------------------
+            try {
+                await db
+                    .update(invoices)
+                    .set({
+                    status: 'failed',
+                    updatedAt: new Date(),
+                })
+                    .where(eq(invoices.jobId, jobId));
+            }
+            catch (invoiceStatusError) {
+                console.error('Failed to update invoice status:', invoiceStatusError);
+            }
+        }
         // --------------------------------------------------
         // SUCCESS
         // --------------------------------------------------
@@ -428,6 +474,14 @@ export const closeJobRequest = async (req, res) => {
             status: 'success',
             message: 'Job closed successfully.',
             ...result,
+            invoice: invoice
+                ? {
+                    id: invoice.id,
+                    invoiceNumber: invoice.invoiceNumber,
+                    status: invoice.status,
+                    pdfFileName: invoice.pdfFileName,
+                }
+                : null,
         });
     }
     catch (error) {
@@ -1483,7 +1537,11 @@ export const generateFinalQuote = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const { jobId, items, comment, discount = 0, gst = 0, } = req.body;
+        const { jobId, items, comment, discount = 0, cgst = null, sgst = null, } = req.body;
+        if ((cgst == null && sgst != null) ||
+            (cgst != null && sgst == null)) {
+            throw new Error("CGST and SGST must either both be provided or both be omitted.");
+        }
         const result = await db.transaction(async (tx) => {
             // ---------------------------------------------------------
             // 1. Get job
@@ -1580,7 +1638,12 @@ export const generateFinalQuote = async (req, res) => {
                 subtotal: "0.00",
                 serviceCharge: "0.00",
                 discount: Number(discount).toFixed(2),
-                tax: Number(gst).toFixed(2),
+                cgst: cgst == null
+                    ? null
+                    : Number(cgst).toFixed(2),
+                sgst: sgst == null
+                    ? null
+                    : Number(sgst).toFixed(2),
                 totalAmount: "0.00",
                 createdByUserId: csUserId,
                 status: "pending",
@@ -1703,11 +1766,17 @@ export const generateFinalQuote = async (req, res) => {
             const finalSubtotal = Math.round(subtotal * 100) / 100;
             const finalServiceCharge = Math.round(totalServiceCharge * 100) / 100;
             const finalDiscount = Math.round(Number(discount) * 100) / 100;
-            const finalTax = Math.round(Number(gst) * 100) / 100;
+            const finalCgst = cgst == null
+                ? 0
+                : Math.round(Number(cgst) * 100) / 100;
+            const finalSgst = sgst == null
+                ? 0
+                : Math.round(Number(sgst) * 100) / 100;
             const totalAmount = Math.round((finalSubtotal +
                 finalServiceCharge -
                 finalDiscount +
-                finalTax) * 100) / 100;
+                finalCgst +
+                finalSgst) * 100) / 100;
             // ---------------------------------------------------------
             // 18. Update quote totals
             // ---------------------------------------------------------
@@ -1717,7 +1786,12 @@ export const generateFinalQuote = async (req, res) => {
                 subtotal: finalSubtotal.toFixed(2),
                 serviceCharge: finalServiceCharge.toFixed(2),
                 discount: finalDiscount.toFixed(2),
-                tax: finalTax.toFixed(2),
+                cgst: cgst == null
+                    ? null
+                    : finalCgst.toFixed(2),
+                sgst: sgst == null
+                    ? null
+                    : finalSgst.toFixed(2),
                 totalAmount: totalAmount.toFixed(2),
             })
                 .where(eq(jobQuotes.id, jobQuote.id))
@@ -1749,7 +1823,8 @@ export const generateFinalQuote = async (req, res) => {
                     subtotal: finalSubtotal,
                     serviceCharge: finalServiceCharge,
                     discount: finalDiscount,
-                    tax: finalTax,
+                    cgst: cgst == null ? null : finalCgst,
+                    sgst: sgst == null ? null : finalSgst,
                     totalAmount,
                 },
             };

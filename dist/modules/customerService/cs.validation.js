@@ -154,10 +154,16 @@ export const generateFinalQuoteSchema = z.object({
         .number()
         .nonnegative("Discount cannot be negative")
         .default(0),
-    gst: z
+    cgst: z
         .number()
-        .nonnegative("Tax cannot be negative")
-        .default(0),
+        .nonnegative("CGST cannot be negative")
+        .nullable()
+        .optional(),
+    sgst: z
+        .number()
+        .nonnegative("SGST cannot be negative")
+        .nullable()
+        .optional(),
 });
 // --------------------------------------------------
 // Get customer details

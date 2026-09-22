@@ -246,27 +246,27 @@ export const approveJobItemByCS = async (
 
       async (transaction: DbTransaction) => {
         const [updatedJobItem] =
-  await transaction
-    .update(jobItems)
-    .set({
-      deviceName: input.deviceName,
-      deviceCategory: input.deviceCategory,
-      deviceSerialNumber: input.deviceSerialNumber,
-      issueDescription: input.issueDescription,
-      issueCategory: input.issueCategory,
-      repairLocation: input.repairLocation,
+          await transaction
+            .update(jobItems)
+            .set({
+              deviceName: input.deviceName,
+              deviceCategory: input.deviceCategory,
+              deviceSerialNumber: input.deviceSerialNumber,
+              issueDescription: input.issueDescription,
+              issueCategory: input.issueCategory,
+              repairLocation: input.repairLocation,
 
-      currentStatus: 'approved_for_transport',
+              currentStatus: 'approved_for_transport',
 
-      isApprovedByCS: true,
+              isApprovedByCS: true,
 
-      estimatedComponentsCost:
-        moneyString(quoteValues.componentsCost),
+              estimatedComponentsCost:
+                moneyString(quoteValues.componentsCost),
 
-      updatedAt: new Date(),
-    })
-    .where(eq(jobItems.id, jobItem.id))
-    .returning();
+              updatedAt: new Date(),
+            })
+            .where(eq(jobItems.id, jobItem.id))
+            .returning();
 
         if (!updatedJobItem) {
           throw new Error(
@@ -530,9 +530,9 @@ export const rejectJobByCS = async (
 
     changedBy,
 
-    note:"Order Rejected By CS Team",
+    note: "Order Rejected By CS Team",
 
-    comment:comment.trim()??"",
+    comment: comment.trim() ?? "",
 
     existingTx:
       tx,
@@ -607,8 +607,8 @@ export const approveJobByCS = async (
 
     changedBy,
 
-    note:"Job approved By CS and waiting for Transport Manager Action",
-    comment:comment.trim()??"",
+    note: "Job approved By CS and waiting for Transport Manager Action",
+    comment: comment.trim() ?? "",
 
     existingTx:
       tx,
@@ -831,8 +831,9 @@ export const processCSJobApproval = async (
             discount:
               '0.00',
 
-            tax:
-              '0.00',
+            cgst: null,
+
+            sgst: null,
 
             totalAmount:
               '0.00',
@@ -923,13 +924,10 @@ export const processCSJobApproval = async (
 
       const discount = 0;
 
-      const tax = 0;
-
       const totalAmount =
         subtotal +
         serviceCharge -
-        discount +
-        tax;
+        discount;
 
 
       // ----------------------------------------------
@@ -955,10 +953,9 @@ export const processCSJobApproval = async (
                 discount,
               ),
 
-            tax:
-              moneyString(
-                tax,
-              ),
+            cgst: null,
+
+            sgst: null,
 
             totalAmount:
               moneyString(

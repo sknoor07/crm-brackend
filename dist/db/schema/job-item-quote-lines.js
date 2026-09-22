@@ -10,5 +10,8 @@ export const jobItemQuoteLines = pgTable('job_item_quote_lines', {
     unitPrice: decimal('unit_price', { precision: 10, scale: 2 }).notNull(),
     lineTotal: decimal('line_total', { precision: 10, scale: 2 }).notNull(),
     sortOrder: integer('sort_order').notNull().default(0),
+    warrantyMonths: integer('warranty_months')
+        .notNull()
+        .default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });

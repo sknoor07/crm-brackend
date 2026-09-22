@@ -2,11 +2,11 @@ import { Pool } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ path: '.env.development' });
 
 // Ensure the connection string exists
 if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL is missing in .env file');
+  throw new Error('DATABASE_URL is missing in .env.development file');
 }
 
 // Use a pooled connection because the workflow relies on database transactions.

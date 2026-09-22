@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+
+  <title>Invoice {{invoiceNumber}}</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #222;
+      background: #ffffff;
+      font-size: 13px;
+    }
+
+    .invoice {
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px;
+    }
+
+    /* -------------------------------
+       HEADER
+    -------------------------------- */
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 35px;
+    }
+
+    .company {
+      width: 55%;
+    }
+
+    .company-name {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .company-details {
+      color: #666;
+      line-height: 1.6;
+    }
+
+    .invoice-title {
+      text-align: right;
+    }
+
+    .invoice-title h1 {
+      margin: 0 0 10px;
+      font-size: 32px;
+      letter-spacing: 1px;
+    }
+
+    .invoice-meta {
+      color: #555;
+      line-height: 1.7;
+    }
+
+    /* -------------------------------
+       DIVIDER
+    -------------------------------- */
+
+    .divider {
+      height: 1px;
+      background: #ddd;
+      margin: 20px 0 30px;
+    }
+
+    /* -------------------------------
+       CUSTOMER / JOB
+    -------------------------------- */
+
+    .information {
+      display: flex;
+      justify-content: space-between;
+      gap: 40px;
+      margin-bottom: 35px;
+    }
+
+    .information-section {
+      width: 50%;
+    }
+
+    .information-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #777;
+      margin-bottom: 8px;
+    }
+
+    .customer-name {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .information-content {
+      color: #555;
+      line-height: 1.6;
+    }
+
+    /* -------------------------------
+       DEVICE
+    -------------------------------- */
+
+    .device {
+      margin-bottom: 25px;
+      page-break-inside: avoid;
+    }
+
+    .device-header {
+      background: #f4f4f4;
+      padding: 12px 14px;
+      border: 1px solid #ddd;
+      font-weight: 700;
+    }
+
+    .device-details {
+      padding: 10px 14px;
+      border-left: 1px solid #ddd;
+      border-right: 1px solid #ddd;
+      border-bottom: 1px solid #ddd;
+      color: #666;
+    }
+
+    /* -------------------------------
+       COMPONENT TABLE
+    -------------------------------- */
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      background: #fafafa;
+      border-bottom: 2px solid #ddd;
+      padding: 10px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: #666;
+    }
+
+    td {
+      padding: 11px 10px;
+      border-bottom: 1px solid #eee;
+      vertical-align: top;
+    }
+
+    .text-right {
+      text-align: right;
+    }
+
+    .text-center {
+      text-align: center;
+    }
+
+    .warranty {
+      color: #555;
+      font-size: 12px;
+    }
+
+    /* -------------------------------
+       TOTALS
+    -------------------------------- */
+
+    .summary-wrapper {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 25px;
+    }
+
+    .summary {
+      width: 320px;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 7px 0;
+      color: #555;
+    }
+
+    .summary-total {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 12px;
+      border-top: 2px solid #222;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    /* -------------------------------
+       FOOTER
+    -------------------------------- */
+
+    .footer {
+      margin-top: 60px;
+      padding-top: 20px;
+      border-top: 1px solid #ddd;
+      color: #777;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .warranty-note {
+      margin-top: 15px;
+      padding: 12px;
+      background: #fafafa;
+      border: 1px solid #eee;
+    }
+
+    /* -------------------------------
+       PRINT
+    -------------------------------- */
+
+    @page {
+      size: A4;
+      margin: 15mm;
+    }
+
+    @media print {
+      body {
+        background: white;
+      }
+
+      .invoice {
+        padding: 0;
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="invoice">
+
+    <!-- HEADER -->
+
+    <div class="header">
+
+      <div class="company">
+
+        <div class="company-name">
+          YOUR COMPANY NAME
+        </div>
+
+        <div class="company-details">
+          Your Company Address<br>
+          Mumbai, Maharashtra<br>
+          India<br>
+          Phone: +91 XXXXX XXXXX<br>
+          Email: support@example.com
+        </div>
+
+      </div>
+
+      <div class="invoice-title">
+
+        <h1>INVOICE</h1>
+
+        <div class="invoice-meta">
+          <strong>Invoice No:</strong>
+          {{invoiceNumber}}
+          <br>
+
+          <strong>Date:</strong>
+          {{invoiceDate}}
+          <br>
+
+          <strong>Job No:</strong>
+          {{jobNumber}}
+        </div>
+
+      </div>
+
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- CUSTOMER -->
+
+    <div class="information">
+
+      <div class="information-section">
+
+        <div class="information-title">
+          Bill To
+        </div>
+
+        <div class="customer-name">
+          {{customerName}}
+        </div>
+
+        <div class="information-content">
+          {{customerEmail}}
+          <br>
+
+          {{customerPhone}}
+          <br>
+
+          {{billingAddress}}
+        </div>
+
+      </div>
+
+      <div class="information-section">
+
+        <div class="information-title">
+          Job Information
+        </div>
+
+        <div class="information-content">
+          <strong>Job Number:</strong>
+          {{jobNumber}}
+          <br>
+
+          <strong>Invoice:</strong>
+          {{invoiceNumber}}
+          <br>
+
+          <strong>Currency:</strong>
+          {{currency}}
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- COMPONENTS -->
+
+    {{items}}
+
+    <!-- TOTALS -->
+
+    <div class="summary-wrapper">
+
+      <div class="summary">
+
+        <div class="summary-row">
+          <span>Subtotal</span>
+          <span>{{currency}} {{subtotal}}</span>
+        </div>
+
+        <div class="summary-row">
+          <span>Service Charge</span>
+          <span>{{currency}} {{serviceCharge}}</span>
+        </div>
+
+        <div class="summary-row">
+          <span>Discount</span>
+          <span>- {{currency}} {{discount}}</span>
+        </div>
+
+        <div class="summary-row">
+          <span>CGST</span>
+          <span>{{currency}} {{cgst}}</span>
+        </div>
+        <div class="summary-row">
+          <span>SGST</span>
+          <span>{{currency}} {{sgst}}</span>
+        </div>
+
+        <div class="summary-total">
+          <span>Total</span>
+          <span>{{currency}} {{totalAmount}}</span>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- FOOTER -->
+
+    <div class="footer">
+
+      <strong>Warranty Information</strong>
+
+      <div class="warranty-note">
+        Component warranty periods are shown against
+        each component above. Warranty is subject to
+        the terms and conditions of the repair service.
+      </div>
+
+      <p>
+        Thank you for choosing our service.
+      </p>
+
+    </div>
+
+  </div>
+
+</body>
+</html>

@@ -225,12 +225,20 @@ export const generateFinalQuoteSchema = z.object({
     )
     .default(0),
 
-  gst: z
+  cgst: z
     .number()
     .nonnegative(
-      "Tax cannot be negative",
+      "CGST cannot be negative",
     )
-    .default(0),
+    .nullable()
+    .optional(),
+  sgst: z
+    .number()
+    .nonnegative(
+      "SGST cannot be negative",
+    )
+    .nullable()
+    .optional(),
 });
 
 export type GenerateFinalQuoteInput =z.infer<typeof generateFinalQuoteSchema>;

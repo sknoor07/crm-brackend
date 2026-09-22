@@ -18,6 +18,8 @@ npm run db:setup
 npm run dev
 ```
 
+Local environment variables are loaded from `.env.development`.
+
 The port is controlled by `PORT` and defaults to `5000`.
 
 ## Authentication

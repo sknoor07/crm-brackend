@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-// Fallback secrets for development (use .env in production)
+// Fallback secrets for development (use environment variables in production)
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'access_secret_key_123';
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'refresh_secret_key_456';
 // Short-lived Access Token (15 mins)

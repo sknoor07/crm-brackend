@@ -349,7 +349,8 @@ export const processCSJobApproval = async (input, csUserId) => {
             subtotal: '0.00',
             serviceCharge: '0.00',
             discount: '0.00',
-            tax: '0.00',
+            cgst: null,
+            sgst: null,
             totalAmount: '0.00',
             createdByUserId: csUserId,
             status: 'estimate',
@@ -390,11 +391,9 @@ export const processCSJobApproval = async (input, csUserId) => {
         // 10. Calculate job quote totals
         // ----------------------------------------------
         const discount = 0;
-        const tax = 0;
         const totalAmount = subtotal +
             serviceCharge -
-            discount +
-            tax;
+            discount;
         // ----------------------------------------------
         // 11. Finalize job quote
         // ----------------------------------------------
@@ -404,7 +403,8 @@ export const processCSJobApproval = async (input, csUserId) => {
             subtotal: moneyString(subtotal),
             serviceCharge: moneyString(serviceCharge),
             discount: moneyString(discount),
-            tax: moneyString(tax),
+            cgst: null,
+            sgst: null,
             totalAmount: moneyString(totalAmount),
             status: 'estimate',
         })

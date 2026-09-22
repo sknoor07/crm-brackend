@@ -1,4 +1,5 @@
 import { z } from 'zod';
+const invoiceStatusEnum = ["pending", "generated", "failed"];
 export const customerRegistrationSchema = z.object({
     firstName: z.string().min(1, 'frist name cannnot be empty').max(200, 'max limit reached'),
     lastName: z.string().min(1).max(200, 'max character limit reached'),
@@ -58,12 +59,20 @@ export const customerJobItemSchema = z.object({
     baseRepairCost: z.string().nullable(),
     createdAt: z.date().nullable(),
 });
+const invoiceStatus = z.enum(invoiceStatusEnum);
+export const InvoiceSchema = z.object({
+    id: z.string().uuid(),
+    invoiceNumber: z.string(),
+    status: invoiceStatus,
+    pdfFileName: z.string().nullable(),
+});
 export const customerJobSchema = z.object({
     id: z.string().uuid(),
     jobNumber: z.string(),
     currentStatus: z.string(),
     paymentConfirmed: z.boolean().nullable(),
     createdAt: z.date().nullable(),
+    invoice: InvoiceSchema.nullable(),
     items: z.array(customerJobItemSchema),
 });
 export const customerJobsSchema = z.array(customerJobSchema);

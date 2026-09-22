@@ -1,6 +1,6 @@
 import { desc, eq, inArray } from 'drizzle-orm';
 import { db } from '../../config/database.js';
-import { jobs, jobItems, jobComments, jobQuotes, jobItemQuotes, jobItemQuoteLines, users, customerProfiles, userRoles, roles, } from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, jobQuotes, jobItemQuotes, jobItemQuoteLines, users, customerProfiles, userRoles, roles, invoices, } from '../../db/schema/index.js';
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 import { updateJobItemWithStatusTransition, } from '../jobstatusandtransitions/item-status-history.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
@@ -241,6 +241,10 @@ export const getAllOrders = async (req, res) => {
             jobCurrentStatus: jobs.currentStatus,
             paymentConfirmed: jobs.paymentConfirmed,
             jobCreatedAt: jobs.createdAt,
+            invoiceId: invoices.id,
+            invoiceNumber: invoices.invoiceNumber,
+            invoiceStatus: invoices.status,
+            invoicePdfFileName: invoices.pdfFileName,
             // -------------------------
             // Job Item
             // -------------------------
@@ -259,7 +263,7 @@ export const getAllOrders = async (req, res) => {
             itemCreatedAt: jobItems.createdAt,
         })
             .from(jobs)
-            .leftJoin(jobItems, eq(jobItems.jobId, jobs.id))
+            .leftJoin(jobItems, eq(jobItems.jobId, jobs.id)).leftJoin(invoices, eq(invoices.jobId, jobs.id))
             .where(eq(jobs.customerId, customerId)).orderBy(desc(jobs.updatedAt));
         const jobsMap = new Map();
         for (const row of result) {
@@ -273,6 +277,14 @@ export const getAllOrders = async (req, res) => {
                     currentStatus: row.jobCurrentStatus,
                     paymentConfirmed: row.paymentConfirmed,
                     createdAt: row.jobCreatedAt,
+                    invoice: row.invoiceId
+                        ? {
+                            id: row.invoiceId,
+                            invoiceNumber: row.invoiceNumber,
+                            status: row.invoiceStatus,
+                            pdfFileName: row.invoicePdfFileName,
+                        }
+                        : null,
                     items: [],
                 });
             }
@@ -730,7 +742,8 @@ export const getCustomerPendingQuotes = async (req, res) => {
                     subtotal: quote.subtotal,
                     serviceCharge: quote.serviceCharge,
                     discount: quote.discount,
-                    tax: quote.tax,
+                    cgst: quote.cgst,
+                    sgst: quote.sgst,
                     totalAmount: quote.totalAmount,
                     createdByUserId: quote.createdByUserId,
                     createdAt: quote.createdAt,

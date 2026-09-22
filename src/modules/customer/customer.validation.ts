@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { updatePassword } from './customer.controller.js';
 
+const invoiceStatusEnum = ["pending", "generated", "failed"] as const;
 
 export const customerRegistrationSchema = z.object({
   firstName: z.string().min(1, 'frist name cannnot be empty').max(200, 'max limit reached'),
@@ -88,9 +88,20 @@ export const customerJobItemSchema = z.object({
 
   createdAt: z.date().nullable(),
 });
+const invoiceStatus = z.enum(invoiceStatusEnum);
+export type InvoiceStatus = z.infer<typeof invoiceStatus>;
+
 
 export type CustomerJobItem =
   z.infer<typeof customerJobItemSchema>;
+
+  export const InvoiceSchema=z.object({
+    
+    id: z.string().uuid(),
+    invoiceNumber: z.string(),
+    status:invoiceStatus,
+    pdfFileName: z.string().nullable(),
+  })
 
 
 export const customerJobSchema = z.object({
@@ -103,6 +114,8 @@ export const customerJobSchema = z.object({
   paymentConfirmed: z.boolean().nullable(),
 
   createdAt: z.date().nullable(),
+  
+  invoice:InvoiceSchema.nullable(),
 
   items: z.array(customerJobItemSchema),
 });

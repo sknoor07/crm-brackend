@@ -4,7 +4,7 @@ import { and, asc, desc, eq, exists, ilike, inArray, notExists, or, sql } from '
 
 import { db } from '../../config/database.js';
 
-import { jobs, jobItems, jobComments, jobStatusHistory, jobClosures, jobItemQuotes, deviceServiceCharges, jobItemQuoteLines, JobItemStatus, jobItemStatusHistory, JobSummaryStatus, users, customerProfiles, jobQuotes, } from '../../db/schema/index.js';
+import { jobs, jobItems, jobComments, jobStatusHistory, jobClosures, jobItemQuotes, deviceServiceCharges, jobItemQuoteLines, JobItemStatus, jobItemStatusHistory, JobSummaryStatus, users, customerProfiles, jobQuotes, invoices, } from '../../db/schema/index.js';
 
 import {
   GenerateFinalQuoteInput, CloseJobInput, CSApproveJobAndJobItemInput,
@@ -16,6 +16,7 @@ import { buildQuoteLineValues, insertJobItemQuoteWithLines, moneyString, resolve
 import { calculateServiceCharge, processCSJobApproval } from './service/approveJobsByCS.js';
 import { allowedJobTransitions, canTransitionJob } from '../jobstatusandtransitions/status-history.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
+import { createInvoiceForJob, generateAndStoreInvoicePdf } from '../invoice/invoice.service.js';
 
 
 
@@ -55,62 +56,62 @@ interface CustomerParams extends ParamsDictionary {
   id: string;
 }
 // after search for customer clik on customer so this functions return the customer with profile and all jobs submitted by customer
-  export const seacrhCustomerDetailswithJob = async (
-    req: Request<CustomerParams>,
-    res: Response
-  ) => {
-    try {
-      const customerId = req.params.id;
+export const seacrhCustomerDetailswithJob = async (
+  req: Request<CustomerParams>,
+  res: Response
+) => {
+  try {
+    const customerId = req.params.id;
 
-      if (!customerId) {
-        return res.status(400).json({ message: "Invalid customer ID", });
-      }
-
-      const rows = await db
-        .select()
-        .from(customerProfiles)
-        .leftJoin(jobs, eq(jobs.customerId, customerId))
-        .where(eq(customerProfiles.userId, customerId));
-
-
-      const customerMap = new Map<
-        string,
-        {
-          customerProfile: typeof rows[number]['customer_profiles'];
-          jobs: typeof rows[number]['jobs'][];
-        }
-      >();
-
-      for (const row of rows) {
-        const customer = row.customer_profiles;
-        const job = row.jobs;
-
-        if (!customer) continue;
-
-        const existingCustomer = customerMap.get(customer.userId);
-
-        if (existingCustomer) {
-          if (job) existingCustomer.jobs.push(job);
-        } else {
-          customerMap.set(customer.userId, {
-            customerProfile: customer,
-            jobs: job ? [job] : [],
-          });
-        }
-      }
-
-      const result = Array.from(customerMap.values());
-
-
-      return res.status(200).json(result);
-    } catch (err) {
-      console.error(err);
-
-      return res.status(500).json({
-        message: "Failed to get customer details",
-      });
+    if (!customerId) {
+      return res.status(400).json({ message: "Invalid customer ID", });
     }
-  };
+
+    const rows = await db
+      .select()
+      .from(customerProfiles)
+      .leftJoin(jobs, eq(jobs.customerId, customerId))
+      .where(eq(customerProfiles.userId, customerId));
+
+
+    const customerMap = new Map<
+      string,
+      {
+        customerProfile: typeof rows[number]['customer_profiles'];
+        jobs: typeof rows[number]['jobs'][];
+      }
+    >();
+
+    for (const row of rows) {
+      const customer = row.customer_profiles;
+      const job = row.jobs;
+
+      if (!customer) continue;
+
+      const existingCustomer = customerMap.get(customer.userId);
+
+      if (existingCustomer) {
+        if (job) existingCustomer.jobs.push(job);
+      } else {
+        customerMap.set(customer.userId, {
+          customerProfile: customer,
+          jobs: job ? [job] : [],
+        });
+      }
+    }
+
+    const result = Array.from(customerMap.values());
+
+
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      message: "Failed to get customer details",
+    });
+  }
+};
 
 
 // search the custmomer 
@@ -508,12 +509,15 @@ export const closeJobRequest = async (
     // --------------------------------------------------
 
     if (
-      !canTransitionJob(job.currentStatus, 'closed')) {
+      !canTransitionJob(
+        job.currentStatus,
+        'closed',
+      )
+    ) {
       return res.status(400).json({
         status: 'error',
         error:
           'Job cannot be closed.',
-
         message:
           `Job cannot transition from ` +
           `${job.currentStatus} to closed.`,
@@ -532,7 +536,6 @@ export const closeJobRequest = async (
         status: 'error',
         error:
           'Job cannot be closed.',
-
         message:
           'Job must contain at least one item.',
       });
@@ -547,6 +550,10 @@ export const closeJobRequest = async (
     // delivered
     // OR
     // repair_rejected
+    // OR
+    // removed_from_quote
+    // OR
+    // cancelled
     // --------------------------------------------------
 
     const nonFinalItems = items.filter(
@@ -600,7 +607,19 @@ export const closeJobRequest = async (
             .select()
             .from(jobs)
             .where(
-              and(eq(jobs.id, jobId), or(eq(jobs.currentStatus, 'delivered'), eq(jobs.currentStatus, 'repair_completed')))
+              and(
+                eq(jobs.id, jobId),
+                or(
+                  eq(
+                    jobs.currentStatus,
+                    'delivered',
+                  ),
+                  eq(
+                    jobs.currentStatus,
+                    'repair_completed',
+                  ),
+                ),
+              ),
             )
             .limit(1);
 
@@ -659,12 +678,6 @@ export const closeJobRequest = async (
         // JOB TRANSITION
         //
         // delivered -> closed
-        //
-        // transitionJob handles:
-        //
-        // 1. jobs update
-        // 2. jobStatusHistory
-        // 3. jobComments
         // --------------------------------------------------
 
         const updatedJob =
@@ -680,44 +693,45 @@ export const closeJobRequest = async (
             changedBy:
               userId,
 
-            note:`Job closed successfully by CS Perosn with Id ${req.user?.userId}.`,
+            note:
+              `Job closed successfully by CS Person with Id ${userId}.`,
 
-            comment:closureReason,
+            comment:
+              closureReason,
+
             existingTx:
               tx,
 
-            updateJob: (tx: DbTransaction) =>
-              tx
-                .update(jobs)
-                .set({
-                  currentStatus:
-                    'closed',
+            updateJob:
+              (tx: DbTransaction) =>
+                tx
+                  .update(jobs)
+                  .set({
+                    currentStatus:
+                      'closed',
 
-                  updatedAt:
-                    new Date(),
-                })
-                .where(
-                  and(
-                    eq(
-                      jobs.id,
-                      jobId,
-                    ),
+                    updatedAt:
+                      new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(
+                        jobs.id,
+                        jobId,
+                      ),
 
-                    eq(
-                      jobs.currentStatus,
-                      currentJob.currentStatus,
+                      eq(
+                        jobs.currentStatus,
+                        currentJob.currentStatus,
+                      ),
                     ),
-                  ),
-                )
-                .returning(),
+                  )
+                  .returning(),
           });
 
 
         // --------------------------------------------------
         // JOB CLOSURE
-        //
-        // This is NOT part of the generic transition
-        // helper because it is specific to closing.
         // --------------------------------------------------
 
         const [closure] =
@@ -729,7 +743,8 @@ export const closeJobRequest = async (
               closedByUserId:
                 userId,
 
-              closingRemarks: closureReason,
+              closingRemarks:
+                closureReason,
 
               customerConfirmed:
                 customerConfirmed,
@@ -745,6 +760,85 @@ export const closeJobRequest = async (
     );
 
 
+    // ==================================================
+    // INVOICE GENERATION
+    //
+    // IMPORTANT:
+    // This happens AFTER the close transaction commits.
+    // ==================================================
+
+    let invoice = null;
+
+    try {
+
+      // --------------------------------------------------
+      // 1. Create invoice snapshot
+      //
+      // This reads the final quote and creates:
+      //
+      // invoices
+      // invoice_items
+      // --------------------------------------------------
+
+      invoice =
+        await createInvoiceForJob(
+          jobId,
+        );
+
+
+      // --------------------------------------------------
+      // 2. Generate PDF
+      // 3. Upload PDF to Neon Object Storage
+      // 4. Update invoice record
+      // --------------------------------------------------
+
+      invoice =
+        await generateAndStoreInvoicePdf(
+          invoice.id,
+        );
+
+    } catch (invoiceError) {
+
+      console.error(
+        'Invoice generation failed after job closure:',
+        invoiceError,
+      );
+
+      // --------------------------------------------------
+      // IMPORTANT:
+      //
+      // Do NOT fail the job closure because invoice
+      // generation failed.
+      //
+      // The job is already closed.
+      // The invoice can be retried later.
+      // --------------------------------------------------
+
+      try {
+
+        await db
+          .update(invoices)
+          .set({
+            status: 'failed',
+            updatedAt: new Date(),
+          })
+          .where(
+            eq(
+              invoices.jobId,
+              jobId,
+            ),
+          );
+
+      } catch (invoiceStatusError) {
+
+        console.error(
+          'Failed to update invoice status:',
+          invoiceStatusError,
+        );
+      }
+    }
+
+
     // --------------------------------------------------
     // SUCCESS
     // --------------------------------------------------
@@ -756,6 +850,18 @@ export const closeJobRequest = async (
         'Job closed successfully.',
 
       ...result,
+
+      invoice: invoice
+        ? {
+          id: invoice.id,
+          invoiceNumber:
+            invoice.invoiceNumber,
+          status:
+            invoice.status,
+          pdfFileName:
+            invoice.pdfFileName,
+        }
+        : null,
     });
 
 
@@ -2325,13 +2431,24 @@ export const generateFinalQuote = async (
       });
     }
 
+
     const {
       jobId,
       items,
       comment,
       discount = 0,
-      gst = 0,
+      cgst = null,
+      sgst = null,
     } = req.body;
+
+    if (
+      (cgst == null && sgst != null) ||
+      (cgst != null && sgst == null)
+    ) {
+      throw new Error(
+        "CGST and SGST must either both be provided or both be omitted.",
+      );
+    }
 
     const result = await db.transaction(async (tx) => {
       // ---------------------------------------------------------
@@ -2386,9 +2503,9 @@ export const generateFinalQuote = async (
       if (invalidItems.length > 0) {
         throw new Error(
           "Final quote cannot be generated because some job items are not ready. " +
-            `Invalid items: ${invalidItems
-              .map((item) => `${item.id} (${item.currentStatus})`)
-              .join(", ")}`,
+          `Invalid items: ${invalidItems
+            .map((item) => `${item.id} (${item.currentStatus})`)
+            .join(", ")}`,
         );
       }
 
@@ -2465,7 +2582,15 @@ export const generateFinalQuote = async (
           subtotal: "0.00",
           serviceCharge: "0.00",
           discount: Number(discount).toFixed(2),
-          tax: Number(gst).toFixed(2),
+          cgst:
+            cgst == null
+              ? null
+              : Number(cgst).toFixed(2),
+
+          sgst:
+            sgst == null
+              ? null
+              : Number(sgst).toFixed(2),
           totalAmount: "0.00",
           createdByUserId: csUserId,
           status: "pending",
@@ -2638,8 +2763,15 @@ export const generateFinalQuote = async (
       const finalDiscount =
         Math.round(Number(discount) * 100) / 100;
 
-      const finalTax =
-        Math.round(Number(gst) * 100) / 100;
+      const finalCgst =
+        cgst == null
+          ? 0
+          : Math.round(Number(cgst) * 100) / 100;
+
+      const finalSgst =
+        sgst == null
+          ? 0
+          : Math.round(Number(sgst) * 100) / 100;
 
       const totalAmount =
         Math.round(
@@ -2647,7 +2779,8 @@ export const generateFinalQuote = async (
             finalSubtotal +
             finalServiceCharge -
             finalDiscount +
-            finalTax
+            finalCgst +
+            finalSgst
           ) * 100,
         ) / 100;
 
@@ -2665,8 +2798,15 @@ export const generateFinalQuote = async (
           discount:
             finalDiscount.toFixed(2),
 
-          tax:
-            finalTax.toFixed(2),
+          cgst:
+            cgst == null
+              ? null
+              : finalCgst.toFixed(2),
+
+          sgst:
+            sgst == null
+              ? null
+              : finalSgst.toFixed(2),
 
           totalAmount:
             totalAmount.toFixed(2),
@@ -2705,7 +2845,8 @@ export const generateFinalQuote = async (
           subtotal: finalSubtotal,
           serviceCharge: finalServiceCharge,
           discount: finalDiscount,
-          tax: finalTax,
+          cgst: cgst == null ? null : finalCgst,
+          sgst: sgst == null ? null : finalSgst,
           totalAmount,
         },
       };
