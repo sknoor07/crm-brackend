@@ -1,0 +1,29 @@
+import z from "zod";
+export const forgotPasswordSchema = z.object({
+    email: z.email('Invalid email address'),
+});
+export const verifyPasswordResetOtpSchema = z.object({
+    email: z.email('Invalid email address'),
+    otp: z.string().length(6, 'OTP must be 6 digits').regex(/^\d+$/, 'OTP must contain only numbers'),
+});
+export const resetPasswordSchema = z.object({
+    resetToken: z.string().min(1, 'Reset token is required'),
+    password: z.string().min(8, 'Password must be at least 8 characters long'),
+});
+export const identifierSchema = z
+    .string()
+    .trim()
+    .refine((value) => z.string().email().safeParse(value).success ||
+    /^[6-9]\d{9}$/.test(value), {
+    message: "Enter a valid email or 10-digit phone number",
+});
+export const requestOtpLoginSchema = z.object({
+    identifier: identifierSchema,
+});
+export const verifyOtpLoginSchema = z.object({
+    identifier: identifierSchema,
+    otp: z
+        .string()
+        .length(6, "OTP must be 6 digits")
+        .regex(/^\d+$/, "OTP must contain only numbers"),
+});

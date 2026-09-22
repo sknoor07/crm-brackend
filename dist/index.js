@@ -1,4 +1,4 @@
-import express, { Express, Request, Response } from 'express';
+import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
@@ -14,33 +14,25 @@ import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
 //import adminRoutes from './modules/admin/admin.routes.js';
 import technicianRoutes from './modules/transport-team-person/transportPerson.routes.js';
 import otpRoutes from './modules/otp/otp.routes.js';
-
-
 dotenv.config();
-
-const app: Express = express();
+const app = express();
 const PORT = process.env.PORT || 5000;
-
 const clientUrl = process.env.CUSTOMER_FRONTEND_URL;
-const CRMUrl= process.env.EMPLOYEE_FRONTEND_URL
+const CRMUrl = process.env.EMPLOYEE_FRONTEND_URL;
 if (!clientUrl) {
-  throw new Error('CLIENT_URL is not configured');
+    throw new Error('CLIENT_URL is not configured');
 }
-
-if(!CRMUrl){
-  throw new Error ('CRM_URL is not configured')
+if (!CRMUrl) {
+    throw new Error('CRM_URL is not configured');
 }
-
 app.use(helmet());
 app.use(cors({
     origin: [clientUrl, CRMUrl],
     credentials: true,
 }));
 app.use(express.json());
-
-
 // API Routes
-app.use('/api/v1/auth', authRoutes); 
+app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/roles', rolesRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 //app.use('/api/v1/admin', adminRoutes);
@@ -49,15 +41,12 @@ app.use('/api/v1/cs', csRoutes);
 app.use('/api/v1/transport', transportRoutes);
 app.use('/api/v1/technician', technicianRoutes);
 app.use('/api/v1/customer', customerRoutes);
-app.use('/api/v1/comments',commentRoutes);
+app.use('/api/v1/comments', commentRoutes);
 app.use('/api/v1/repair', repairRoutes);
-app.use('/api/v1/otp',otpRoutes);
-
-app.get('/api/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'OK', message: 'API is running smoothly!' });
+app.use('/api/v1/otp', otpRoutes);
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'OK', message: 'API is running smoothly!' });
 });
-
-
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });

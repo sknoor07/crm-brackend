@@ -7,7 +7,7 @@
 //   sql,
 // } from 'drizzle-orm';
 // import { Request, Response } from 'express';
-
+export {};
 // import { db } from '../../config/database.js';
 // import {
 //   jobComments,
@@ -21,25 +21,21 @@
 //   users,
 //   warranties,
 // } from '../../db/schema/index.js';
-
 // const parseDateRange = (value: unknown) => {
 //   const date = String(value ?? '').trim();
 //   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 //   const selectedDate = datePattern.test(date)
 //     ? date
 //     : new Date().toISOString().slice(0, 10);
-
 //   const start = new Date(`${selectedDate}T00:00:00.000Z`);
 //   const end = new Date(`${selectedDate}T00:00:00.000Z`);
 //   end.setUTCDate(end.getUTCDate() + 1);
-
 //   return {
 //     selectedDate,
 //     start,
 //     end,
 //   };
 // };
-
 // const countBy = <T extends Record<string, unknown>>(
 //   rows: T[],
 //   key: keyof T,
@@ -47,7 +43,6 @@
 //   Object.fromEntries(
 //     rows.map((row) => [String(row[key]), Number(row.count)]),
 //   );
-
 // export const getAdminAnalytics = async (
 //   req: Request,
 //   res: Response,
@@ -58,7 +53,6 @@
 //     );
 //     const startDate = start;
 //     const endDate = end;
-
 //     const [jobsCreated, itemsCreated, commentsCreated] =
 //       await Promise.all([
 //         db
@@ -89,7 +83,6 @@
 //             ),
 //           ),
 //       ]);
-
 //     const [statusRows, transitionRows, hourlyRows] =
 //       await Promise.all([
 //         db
@@ -131,7 +124,6 @@
 //             asc(sql`date_trunc('hour', ${jobs.createdAt})`),
 //           ),
 //       ]);
-
 //     const [jobHistoryToday, itemHistoryToday] =
 //       await Promise.all([
 //         db
@@ -153,7 +145,6 @@
 //             ),
 //           ),
 //       ]);
-
 //     const [quotesToday, quoteStatuses, quoteTotals] =
 //       await Promise.all([
 //         db
@@ -191,7 +182,6 @@
 //             ),
 //           ),
 //       ]);
-
 //     const [assignmentSummary, activeUsersByRole, warrantiesToday] =
 //       await Promise.all([
 //         db
@@ -221,10 +211,8 @@
 //             ),
 //           ),
 //       ]);
-
 //     const [latestAssignments] = assignmentSummary;
 //     const [quoteAmount] = quoteTotals;
-
 //     return res.status(200).json({
 //       success: true,
 //       data: {
