@@ -164,6 +164,56 @@ export const generateFinalQuoteSchema = z.object({
         .nonnegative("SGST cannot be negative")
         .nullable()
         .optional(),
+    igst: z
+        .number()
+        .nonnegative("IGST cannot be negative")
+        .nullable()
+        .optional(),
+    gstType: z
+        .enum(["none", "intra_state", "inter_state"])
+        .default("none"),
+}).superRefine((value, context) => {
+    if (value.gstType === "none") {
+        if (value.cgst != null || value.sgst != null || value.igst != null) {
+            context.addIssue({
+                code: "custom",
+                path: ["gstType"],
+                message: "GST values must be omitted for none GST.",
+            });
+        }
+    }
+    if (value.gstType === "intra_state") {
+        if (value.cgst == null || value.sgst == null) {
+            context.addIssue({
+                code: "custom",
+                path: ["cgst"],
+                message: "CGST and SGST are both required for intra-state GST.",
+            });
+        }
+        if (value.igst != null) {
+            context.addIssue({
+                code: "custom",
+                path: ["igst"],
+                message: "IGST cannot be used with intra-state GST.",
+            });
+        }
+    }
+    if (value.gstType === "inter_state") {
+        if (value.igst == null) {
+            context.addIssue({
+                code: "custom",
+                path: ["igst"],
+                message: "IGST is required for inter-state GST.",
+            });
+        }
+        if (value.cgst != null || value.sgst != null) {
+            context.addIssue({
+                code: "custom",
+                path: ["cgst"],
+                message: "CGST and SGST cannot be used with inter-state GST.",
+            });
+        }
+    }
 });
 // --------------------------------------------------
 // Get customer details

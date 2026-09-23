@@ -2,9 +2,11 @@ import { Router } from 'express';
 
 import {
   createCustomerJob,
+  customerLogin,
   getAllOrders,
   getCustomerPendingQuotes,
   getCustomerProfile,
+  getOrderHistory,
   registerCustomer,
   respondToQuote,
   updateCustomerProfile,
@@ -29,6 +31,7 @@ import { getCustomerOrders } from './orders.controller.js';
 const router = Router();
 
 router.post("/register",registerCustomer);
+router.post("/login",customerLogin);
 
 router.get(
   '/orders',
@@ -36,6 +39,13 @@ router.get(
   requireRole(['customer']),
   getAllOrders,
 );
+
+router.get(
+  '/history',
+  requireAuth,
+  requireRole(['customer']),
+  getOrderHistory,
+)
 
 router.post(
   '/jobs',

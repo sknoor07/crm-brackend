@@ -1537,10 +1537,15 @@ export const generateFinalQuote = async (req, res) => {
                 message: "Unauthorized",
             });
         }
-        const { jobId, items, comment, discount = 0, cgst = null, sgst = null, } = req.body;
-        if ((cgst == null && sgst != null) ||
-            (cgst != null && sgst == null)) {
-            throw new Error("CGST and SGST must either both be provided or both be omitted.");
+        const { jobId, items, comment, discount = 0, cgst = null, sgst = null, igst = null, gstType = "none", } = req.body;
+        if (gstType === "none" && (cgst != null || sgst != null || igst != null)) {
+            throw new Error("GST values must be omitted for none GST.");
+        }
+        if (gstType === "intra_state" && (cgst == null || sgst == null || igst != null)) {
+            throw new Error("Intra-state GST requires CGST and SGST only.");
+        }
+        if (gstType === "inter_state" && (igst == null || cgst != null || sgst != null)) {
+            throw new Error("Inter-state GST requires IGST only.");
         }
         const result = await db.transaction(async (tx) => {
             // ---------------------------------------------------------
@@ -1644,6 +1649,10 @@ export const generateFinalQuote = async (req, res) => {
                 sgst: sgst == null
                     ? null
                     : Number(sgst).toFixed(2),
+                igst: igst == null
+                    ? null
+                    : Number(igst).toFixed(2),
+                gstType,
                 totalAmount: "0.00",
                 createdByUserId: csUserId,
                 status: "pending",
@@ -1772,11 +1781,15 @@ export const generateFinalQuote = async (req, res) => {
             const finalSgst = sgst == null
                 ? 0
                 : Math.round(Number(sgst) * 100) / 100;
+            const finalIgst = igst == null
+                ? 0
+                : Math.round(Number(igst) * 100) / 100;
             const totalAmount = Math.round((finalSubtotal +
                 finalServiceCharge -
                 finalDiscount +
                 finalCgst +
-                finalSgst) * 100) / 100;
+                finalSgst +
+                finalIgst) * 100) / 100;
             // ---------------------------------------------------------
             // 18. Update quote totals
             // ---------------------------------------------------------
@@ -1792,6 +1805,10 @@ export const generateFinalQuote = async (req, res) => {
                 sgst: sgst == null
                     ? null
                     : finalSgst.toFixed(2),
+                igst: igst == null
+                    ? null
+                    : finalIgst.toFixed(2),
+                gstType,
                 totalAmount: totalAmount.toFixed(2),
             })
                 .where(eq(jobQuotes.id, jobQuote.id))
@@ -1825,6 +1842,8 @@ export const generateFinalQuote = async (req, res) => {
                     discount: finalDiscount,
                     cgst: cgst == null ? null : finalCgst,
                     sgst: sgst == null ? null : finalSgst,
+                    igst: igst == null ? null : finalIgst,
+                    gstType,
                     totalAmount,
                 },
             };

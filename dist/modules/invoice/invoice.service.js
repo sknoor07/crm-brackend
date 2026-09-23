@@ -75,6 +75,8 @@ export const createInvoiceForJob = async (jobId) => {
             discount: finalQuote.discount,
             cgst: finalQuote.cgst,
             sgst: finalQuote.sgst,
+            igst: finalQuote.igst,
+            gstType: finalQuote.gstType,
             totalAmount: finalQuote.totalAmount,
             currency: 'INR',
             status: 'pending',

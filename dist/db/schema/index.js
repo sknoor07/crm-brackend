@@ -15,6 +15,7 @@ export * from './repeat-repairs.js';
 export * from './job-item-quotes.js';
 export * from './job-item-quote-lines.js';
 export * from './job_quotes.js';
+export * from './gst.js';
 export * from './otp_verifications.js';
 export * from './invoice-items.js';
 export * from './invoices.js';

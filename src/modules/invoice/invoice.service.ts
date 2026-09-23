@@ -122,6 +122,8 @@ export const createInvoiceForJob = async (
 
         cgst: finalQuote.cgst,
         sgst: finalQuote.sgst,
+        igst: finalQuote.igst,
+        gstType: finalQuote.gstType,
 
         totalAmount: finalQuote.totalAmount,
 

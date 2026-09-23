@@ -38,6 +38,7 @@ export const getInvoicePdfData = async (invoiceId) => {
         phone: users.phone,
         firstName: customerProfiles.firstName,
         lastName: customerProfiles.lastName,
+        gstin: customerProfiles.gstin,
         billingAddress: customerProfiles.billingAddress,
     })
         .from(users)
@@ -94,6 +95,7 @@ export const getInvoicePdfData = async (invoiceId) => {
         customer: {
             name: `${customer.firstName} ${customer.lastName}`,
             email: customer.email,
+            gstin: customer.gstin,
             phone: customer.phone,
             billingAddress: customer.billingAddress,
         },
@@ -106,6 +108,8 @@ export const getInvoicePdfData = async (invoiceId) => {
         discount: invoice.discount,
         cgst: invoice.cgst,
         sgst: invoice.sgst,
+        igst: invoice.igst,
+        gstType: invoice.gstType,
         totalAmount: invoice.totalAmount,
         currency: invoice.currency,
     };

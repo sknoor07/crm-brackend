@@ -5,6 +5,7 @@ export interface InvoicePdfData {
   customer: {
     name: string;
     email: string;
+    gstin:string |null;
     phone: string | null;
     billingAddress: string | null;
   };
@@ -33,6 +34,8 @@ export interface InvoicePdfData {
 
   cgst: string | null;
   sgst: string | null;
+  igst: string | null;
+  gstType: 'none' | 'intra_state' | 'inter_state';
 
   totalAmount: string;
   currency: string;

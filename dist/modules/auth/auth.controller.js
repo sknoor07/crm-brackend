@@ -18,7 +18,7 @@ const getCookieValue = (req, name) => {
 export const generateInvitationToken = () => {
     return crypto.randomBytes(32).toString('hex');
 };
-const deleteExpiredRefreshTokens = async (now) => {
+export const deleteExpiredRefreshTokens = async (now) => {
     await db.delete(refreshTokens).where(lt(refreshTokens.expiresAt, now));
 };
 export const registerEmployee = async (req, res) => {
@@ -96,12 +96,12 @@ export const loginUser = async (req, res) => {
             .innerJoin(roles, eq(userRoles.roleId, roles.id))
             .where(eq(userRoles.userId, user.id));
         const roleNames = userRoleRows.map((role) => role.roleName);
-        // if(roleNames.includes("customer")){
-        //   return res.status(401).json({
-        //     error: "Customers aren't authorised to access this portal."
-        //   });
-        // }
-        const userProfile = await db.select().from(employeeProfiles).where(eq(employeeProfiles.userId, user.id)).limit(1);
+        if (roleNames.includes("customer")) {
+            return res.status(401).json({
+                error: "Customers aren't authorised to access this portal."
+            });
+        }
+        const [userProfile] = await db.select().from(employeeProfiles).where(eq(employeeProfiles.userId, user.id)).limit(1);
         const isPasswordValid = await comparePasswords(password, user.passwordHash);
         if (!isPasswordValid) {
             return res.status(401).json({

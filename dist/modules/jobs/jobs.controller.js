@@ -1,36 +1,26 @@
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { db } from '../../config/database.js';
-import { jobs, jobItems, } from '../../db/schema/index.js';
-// export const getDeviceCategories = async (
-//   req: Request,
-//   res: Response,
-// ) => {
-//   try {
-//     const categories = await db
-//       .select({
-//         value:
-//           deviceServiceCharges.deviceCategory,
-//         serviceCharge:
-//           deviceServiceCharges.chargeAmount,
-//       })
-//       .from(deviceServiceCharges)
-//       .orderBy(
-//         asc(deviceServiceCharges.deviceCategory),
-//       );
-//     return res.status(200).json({
-//       categories,
-//     });
-//   } catch (error) {
-//     console.error(
-//       'Fetch device categories error:',
-//       error,
-//     );
-//     return res.status(500).json({
-//       error:
-//         'Internal server error while fetching device categories',
-//     });
-//   }
-// };
+import { jobs, jobItems, deviceServiceCharges, } from '../../db/schema/index.js';
+export const getDeviceCategories = async (req, res) => {
+    try {
+        const categories = await db
+            .select({
+            value: deviceServiceCharges.deviceCategory,
+            serviceCharge: deviceServiceCharges.chargeAmount,
+        })
+            .from(deviceServiceCharges)
+            .orderBy(asc(deviceServiceCharges.deviceCategory));
+        return res.status(200).json({
+            categories,
+        });
+    }
+    catch (error) {
+        console.error('Fetch device categories error:', error);
+        return res.status(500).json({
+            error: 'Internal server error while fetching device categories',
+        });
+    }
+};
 // export const createJobByCS = async (
 //   req: Request<{}, {}, CreateJobInput>,
 //   res: Response,

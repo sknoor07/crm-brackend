@@ -351,6 +351,8 @@ export const processCSJobApproval = async (input, csUserId) => {
             discount: '0.00',
             cgst: null,
             sgst: null,
+            igst: null,
+            gstType: 'none',
             totalAmount: '0.00',
             createdByUserId: csUserId,
             status: 'estimate',
@@ -405,6 +407,8 @@ export const processCSJobApproval = async (input, csUserId) => {
             discount: moneyString(discount),
             cgst: null,
             sgst: null,
+            igst: null,
+            gstType: 'none',
             totalAmount: moneyString(totalAmount),
             status: 'estimate',
         })

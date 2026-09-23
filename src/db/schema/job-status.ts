@@ -43,7 +43,6 @@ export const jobSummaryStatusValues = [
 
   // Terminal
   'closed',
-  'done',
   'cancelled',
 ] as const;
 

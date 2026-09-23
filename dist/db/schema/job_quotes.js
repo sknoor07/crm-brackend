@@ -1,6 +1,7 @@
 import { pgEnum, pgTable, uuid, decimal, timestamp, integer, unique, } from 'drizzle-orm/pg-core';
 import { jobs } from './jobs.js';
 import { users } from './users.js';
+import { gstType } from './gst.js';
 export const jobQuoteStatus = pgEnum('job_quote_status', [
     'estimate',
     'pending',
@@ -25,7 +26,7 @@ export const jobQuotes = pgTable('job_quotes', {
         precision: 10,
         scale: 2,
     }).notNull(),
-    cgst: decimal('csgst', {
+    cgst: decimal('cgst', {
         precision: 10,
         scale: 2,
     }),
@@ -33,6 +34,13 @@ export const jobQuotes = pgTable('job_quotes', {
         precision: 10,
         scale: 2,
     }),
+    igst: decimal('igst', {
+        precision: 10,
+        scale: 2,
+    }),
+    gstType: gstType('gst_type')
+        .notNull()
+        .default('none'),
     totalAmount: decimal('total_amount', {
         precision: 10,
         scale: 2,

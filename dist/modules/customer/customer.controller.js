@@ -1,10 +1,12 @@
-import { desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, notInArray } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { jobs, jobItems, jobComments, jobQuotes, jobItemQuotes, jobItemQuoteLines, users, customerProfiles, userRoles, roles, invoices, } from '../../db/schema/index.js';
 import { generateJobNumber } from '../../shared/utils/jobNumber.js';
 import { updateJobItemWithStatusTransition, } from '../jobstatusandtransitions/item-status-history.js';
 import { transitionJob } from '../jobstatusandtransitions/transition-job.js';
-import { hashPassword } from '../../shared/utils/password.js';
+import { comparePasswords, hashPassword } from '../../shared/utils/password.js';
+import { deleteExpiredRefreshTokens } from '../auth/auth.controller.js';
+import { createLoginSession } from '../auth/auth-session.service.js';
 export const registerCustomer = async (req, res) => {
     try {
         const { firstName, lastName, phoneNumber, email, password, } = req.body;
@@ -100,6 +102,62 @@ export const registerCustomer = async (req, res) => {
         return res.status(500).json({
             error: 'Internal server error. Please try again later.',
         });
+    }
+};
+export const customerLogin = async (req, res) => {
+    try {
+        await deleteExpiredRefreshTokens(new Date());
+        const { email, password } = req.body;
+        // 1. Find user by email
+        const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+        if (!user || !user.isActive) {
+            return res.status(401).json({ error: 'Invalid email or password' });
+        }
+        if (!user.passwordHash) {
+            return res.status(401).json({
+                error: 'Password has not been set. Please use your invitation link.'
+            });
+        }
+        const userRoleRows = await db.select({ roleName: roles.name, })
+            .from(userRoles)
+            .innerJoin(roles, eq(userRoles.roleId, roles.id))
+            .where(eq(userRoles.userId, user.id));
+        const roleNames = userRoleRows.map((role) => role.roleName);
+        const [userProfile] = await db.select().from(customerProfiles).where(eq(customerProfiles.userId, user.id)).limit(1);
+        const isPasswordValid = await comparePasswords(password, user.passwordHash);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                error: 'Invalid email or password',
+            });
+        }
+        const { accessToken, refreshToken } = await createLoginSession({
+            userId: user.id,
+            userType: user.userType,
+        });
+        // 6. Send Refresh Token securely via HTTP-only cookie (14 days)
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 14 * 24 * 60 * 60 * 1000, // 14 days in milliseconds
+        });
+        // 7. Return Access Token & basic user info
+        return res.status(200).json({
+            message: 'Login successful',
+            accessToken,
+            user: {
+                id: user.id,
+                email: user.email,
+                userType: user.userType,
+                roles: roleNames,
+                mustChangePassword: user.mustChangePassword,
+            },
+            userProfile,
+        });
+    }
+    catch (error) {
+        console.error('Login Error:', error);
+        return res.status(500).json({ error: 'Internal server error during login' });
     }
 };
 /**
@@ -264,7 +322,98 @@ export const getAllOrders = async (req, res) => {
         })
             .from(jobs)
             .leftJoin(jobItems, eq(jobItems.jobId, jobs.id)).leftJoin(invoices, eq(invoices.jobId, jobs.id))
-            .where(eq(jobs.customerId, customerId)).orderBy(desc(jobs.updatedAt));
+            .where(and(eq(jobs.customerId, customerId), notInArray(jobs.currentStatus, ["closed", "cancelled"]))).orderBy(desc(jobs.updatedAt));
+        const jobsMap = new Map();
+        for (const row of result) {
+            // =========================
+            // CREATE JOB
+            // =========================
+            if (!jobsMap.has(row.jobId)) {
+                jobsMap.set(row.jobId, {
+                    id: row.jobId,
+                    jobNumber: row.jobNumber,
+                    currentStatus: row.jobCurrentStatus,
+                    paymentConfirmed: row.paymentConfirmed,
+                    createdAt: row.jobCreatedAt,
+                    invoice: row.invoiceId
+                        ? {
+                            id: row.invoiceId,
+                            invoiceNumber: row.invoiceNumber,
+                            status: row.invoiceStatus,
+                            pdfFileName: row.invoicePdfFileName,
+                        }
+                        : null,
+                    items: [],
+                });
+            }
+            // =========================
+            // ADD ITEM TO JOB
+            // =========================
+            if (row.itemId) {
+                jobsMap.get(row.jobId).items.push({
+                    id: row.itemId,
+                    deviceName: row.deviceName,
+                    deviceCategory: row.deviceCategory,
+                    deviceSerialNumber: row.deviceSerialNumber,
+                    issueDescription: row.issueDescription,
+                    issueCategory: row.issueCategory,
+                    repairLocation: row.repairLocation,
+                    estimatedComponentsCost: row.estimatedComponentsCost,
+                    finalComponentsCost: row.finalComponentsCost,
+                    serviceChargeApplied: row.serviceChargeApplied,
+                    isFinalQuoteApproved: row.isFinalQuoteApproved ?? false,
+                    baseRepairCost: row.baseRepairCost,
+                    createdAt: row.itemCreatedAt,
+                });
+            }
+        }
+        res.status(200).json(Array.from(jobsMap.values()));
+    }
+    catch (err) {
+        res.status(500).json({ mesaage: "can't fetch order history" });
+    }
+};
+export const getOrderHistory = async (req, res) => {
+    try {
+        const customerId = req.user?.userId;
+        if (!customerId) {
+            res.status(401).json({ message: "user not authenticated" });
+            return;
+        }
+        const result = await db
+            .select({
+            // -------------------------
+            // Job
+            // -------------------------
+            jobId: jobs.id,
+            jobNumber: jobs.jobNumber,
+            jobCurrentStatus: jobs.currentStatus,
+            paymentConfirmed: jobs.paymentConfirmed,
+            jobCreatedAt: jobs.createdAt,
+            invoiceId: invoices.id,
+            invoiceNumber: invoices.invoiceNumber,
+            invoiceStatus: invoices.status,
+            invoicePdfFileName: invoices.pdfFileName,
+            // -------------------------
+            // Job Item
+            // -------------------------
+            itemId: jobItems.id,
+            deviceName: jobItems.deviceName,
+            deviceCategory: jobItems.deviceCategory,
+            deviceSerialNumber: jobItems.deviceSerialNumber,
+            issueDescription: jobItems.issueDescription,
+            issueCategory: jobItems.issueCategory,
+            repairLocation: jobItems.repairLocation,
+            estimatedComponentsCost: jobItems.estimatedComponentsCost,
+            finalComponentsCost: jobItems.finalComponentsCost,
+            serviceChargeApplied: jobItems.serviceChargeApplied,
+            isFinalQuoteApproved: jobItems.isFinalQuoteApproved,
+            baseRepairCost: jobItems.baseRepairCost,
+            itemCreatedAt: jobItems.createdAt,
+        })
+            .from(jobs)
+            .leftJoin(jobItems, eq(jobItems.jobId, jobs.id)).leftJoin(invoices, eq(invoices.jobId, jobs.id))
+            .where(and(eq(jobs.customerId, customerId), eq(jobs.currentStatus, "closed"))).orderBy(desc(jobs.updatedAt));
         const jobsMap = new Map();
         for (const row of result) {
             // =========================
@@ -744,6 +893,8 @@ export const getCustomerPendingQuotes = async (req, res) => {
                     discount: quote.discount,
                     cgst: quote.cgst,
                     sgst: quote.sgst,
+                    igst: quote.igst,
+                    gstType: quote.gstType,
                     totalAmount: quote.totalAmount,
                     createdByUserId: quote.createdByUserId,
                     createdAt: quote.createdAt,
@@ -806,17 +957,23 @@ export const updateCustomerProfile = async (req, res) => {
                 phone: data.phoneNumber,
                 firstName: data.firstName,
                 lastName: data.lastName,
+                gstin: data.gstin,
                 billingAddress: data.billingAddress
             })
                 .where(eq(customerProfiles.userId, userId))
                 .returning();
             return {
-                user,
-                userResult,
-                profileResult,
+                updatedInfo: {
+                    email: userResult[0].email,
+                    phone: userResult[0].phone,
+                    gstin: profileResult[0].gstin,
+                    firstName: profileResult[0].firstName,
+                    lastName: profileResult[0].lastName,
+                    billingAddress: profileResult[0].billingAddress,
+                }
             };
         });
-        res.status(200).json({ message: "Profile Fetched Successfully", data: result });
+        res.status(200).json({ message: "Profile Fetched Successfully", result });
     }
     catch (err) {
         res.status(404).json({ message: "Profiel cannot be fecthed" });

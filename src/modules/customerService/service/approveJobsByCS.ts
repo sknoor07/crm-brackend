@@ -835,6 +835,10 @@ export const processCSJobApproval = async (
 
             sgst: null,
 
+            igst: null,
+
+            gstType: 'none',
+
             totalAmount:
               '0.00',
 
@@ -956,6 +960,10 @@ export const processCSJobApproval = async (
             cgst: null,
 
             sgst: null,
+
+            igst: null,
+
+            gstType: 'none',
 
             totalAmount:
               moneyString(

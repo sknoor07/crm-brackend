@@ -58,8 +58,6 @@ export const allowedJobTransitions: Record<
     'closed',
   ],
 
-  done: [],
-
   closed: [],
 
   cancelled: [],

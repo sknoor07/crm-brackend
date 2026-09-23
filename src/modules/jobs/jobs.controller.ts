@@ -42,38 +42,38 @@ import {
   resolveQuoteComponents,
 } from './quote-components.js';
 
-// export const getDeviceCategories = async (
-//   req: Request,
-//   res: Response,
-// ) => {
-//   try {
-//     const categories = await db
-//       .select({
-//         value:
-//           deviceServiceCharges.deviceCategory,
-//         serviceCharge:
-//           deviceServiceCharges.chargeAmount,
-//       })
-//       .from(deviceServiceCharges)
-//       .orderBy(
-//         asc(deviceServiceCharges.deviceCategory),
-//       );
+export const getDeviceCategories = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const categories = await db
+      .select({
+        value:
+          deviceServiceCharges.deviceCategory,
+        serviceCharge:
+          deviceServiceCharges.chargeAmount,
+      })
+      .from(deviceServiceCharges)
+      .orderBy(
+        asc(deviceServiceCharges.deviceCategory),
+      );
 
-//     return res.status(200).json({
-//       categories,
-//     });
-//   } catch (error) {
-//     console.error(
-//       'Fetch device categories error:',
-//       error,
-//     );
+    return res.status(200).json({
+      categories,
+    });
+  } catch (error) {
+    console.error(
+      'Fetch device categories error:',
+      error,
+    );
 
-//     return res.status(500).json({
-//       error:
-//         'Internal server error while fetching device categories',
-//     });
-//   }
-// };
+    return res.status(500).json({
+      error:
+        'Internal server error while fetching device categories',
+    });
+  }
+};
 
 // export const createJobByCS = async (
 //   req: Request<{}, {}, CreateJobInput>,

@@ -76,11 +76,17 @@ export const customerJobSchema = z.object({
     items: z.array(customerJobItemSchema),
 });
 export const customerJobsSchema = z.array(customerJobSchema);
+export const gstinSchema = z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, "Invalid GSTIN format");
 export const customerProfile = z.object({
     firstName: z.string().min(1, 'frist name cannnot be empty').max(200, 'max limit reached'),
     lastName: z.string().min(1).max(200, 'max character limit reached'),
     phoneNumber: z.string().min(10, 'phone number too short').max(11, 'phone number too long'),
     email: z.email('Invalid email Id Format'),
+    gstin: gstinSchema.optional().or(z.literal("")),
     billingAddress: z.string().max(20000, 'address cannot be this long'),
 });
 export const passwordSchema = z.object({

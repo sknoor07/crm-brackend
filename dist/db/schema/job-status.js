@@ -26,7 +26,6 @@ export const jobSummaryStatusValues = [
     'delivered',
     // Terminal
     'closed',
-    'done',
     'cancelled',
 ];
 export const jobSummaryStatus = pgEnum('job_summary_status', jobSummaryStatusValues);

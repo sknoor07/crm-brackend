@@ -27,7 +27,7 @@ export const generateInvitationToken = () => {
 };
 
 
-const deleteExpiredRefreshTokens = async (now: Date) => {
+export const deleteExpiredRefreshTokens = async (now: Date) => {
   await db.delete(refreshTokens).where(lt(refreshTokens.expiresAt, now));
 };
 
@@ -139,12 +139,12 @@ export const loginUser = async (req: Request<{}, {}, LoginInput>, res: Response)
       .where(eq(userRoles.userId, user.id));
 
     const roleNames = userRoleRows.map((role) => role.roleName);
-    // if(roleNames.includes("customer")){
-    //   return res.status(401).json({
-    //     error: "Customers aren't authorised to access this portal."
-    //   });
-    // }
-    const userProfile= await db.select().from(employeeProfiles).where(eq(employeeProfiles.userId,user.id)).limit(1);
+    if(roleNames.includes("customer")){
+       return res.status(401).json({
+         error: "Customers aren't authorised to access this portal."
+       });
+     }
+    const [userProfile]= await db.select().from(employeeProfiles).where(eq(employeeProfiles.userId,user.id)).limit(1);
 
     const isPasswordValid = await comparePasswords(
       password,

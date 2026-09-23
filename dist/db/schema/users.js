@@ -49,6 +49,7 @@ export const customerProfiles = pgTable('customer_profiles', {
     firstName: varchar('first_name', { length: 100 }).notNull(),
     lastName: varchar('last_name', { length: 100 }).notNull(),
     phone: varchar('phone', { length: 20 }),
+    gstin: varchar('gstin', { length: 15 }),
     billingAddress: text('billing_address'),
 });
 /**

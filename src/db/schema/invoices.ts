@@ -12,6 +12,7 @@ import {
 import { jobs } from './jobs.js';
 import { users } from './users.js';
 import { jobQuotes } from './job_quotes.js';
+import { gstType } from './gst.js';
 
 export const invoiceStatus = pgEnum(
   'invoice_status',
@@ -72,6 +73,15 @@ export const invoices = pgTable(
       precision: 10,
       scale: 2,
     }),
+
+    igst: decimal('igst', {
+      precision: 10,
+      scale: 2,
+    }),
+
+    gstType: gstType('gst_type')
+      .notNull()
+      .default('none'),
 
     totalAmount: decimal('total_amount', {
       precision: 10,

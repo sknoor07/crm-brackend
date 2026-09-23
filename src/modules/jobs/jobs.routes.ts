@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import {
   // createJobByCS,
-  // getDeviceCategories,
+   getDeviceCategories,
   getJobWithItems,
 } from './jobs.controller.js';
 
@@ -39,15 +39,15 @@ router.get(
   listJobs,
 );
 
-// router.get(
-//   '/device-categories',
-//   requireRole([
-//     'admin',
-//     'customer_service',
-//     'customer',
-//   ]),
-//   getDeviceCategories,
-// );
+router.get(
+  '/device-categories',
+  requireRole([
+    'admin',
+    'customer_service',
+    'customer',
+  ]),
+  getDeviceCategories,
+);
 
 router.get(
   '/jobs-with-items',

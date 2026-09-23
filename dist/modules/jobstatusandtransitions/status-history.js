@@ -39,7 +39,6 @@ export const allowedJobTransitions = {
     delivered: [
         'closed',
     ],
-    done: [],
     closed: [],
     cancelled: [],
 };
