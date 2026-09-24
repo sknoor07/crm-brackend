@@ -18,6 +18,12 @@ export const estimatedComponentSchema = z.object({
   unitPrice: z
     .number()
     .nonnegative('Unit price cannot be negative'),
+
+  warrantyMonths: z
+    .number()
+    .int()
+    .nonnegative('Warranty duration cannot be negative')
+    .default(0),
 });
 export type QuoteComponentInput = z.infer<typeof estimatedComponentSchema>;
 

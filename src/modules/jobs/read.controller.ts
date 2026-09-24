@@ -142,97 +142,97 @@ const ownershipFilter = (req: Request): SQL | undefined => {
 //   }
 // };
 
-export const getJobDetailedStatusHistory = async (req: Request,res: Response,) => {
-  try {
-    const jobId = String(req.params.jobId);
+// export const getJobDetailedStatusHistory = async (req: Request,res: Response,) => {
+//   try {
+//     const jobId = String(req.params.jobId);
     
 
-    const [job] = await db
-      .select({ id: jobs.id })
-      .from(jobs)
-      .where(eq(jobs.id,jobId))
-      .limit(1);
+//     const [job] = await db
+//       .select({ id: jobs.id })
+//       .from(jobs)
+//       .where(eq(jobs.id,jobId))
+//       .limit(1);
 
-    if (!job) {
-      return res.status(404).json({
-        success: false,
-        error: 'Job not found',
-      });
-    }
+//     if (!job) {
+//       return res.status(404).json({
+//         success: false,
+//         error: 'Job not found',
+//       });
+//     }
 
-    const history = await db
-      .select({
-        id: jobStatusHistory.id,
-        previousStatus: jobStatusHistory.previousStatus,
-        newStatus: jobStatusHistory.newStatus,
-        note: jobStatusHistory.note,
-        createdAt: jobStatusHistory.createdAt,
-        changedById: jobStatusHistory.changedBy,
-        changedByEmail: users.email,
-      })
-      .from(jobStatusHistory)
-      .leftJoin(users, eq(users.id, jobStatusHistory.changedBy))
-      .where(eq(jobStatusHistory.jobId, jobId))
-      .orderBy(desc(jobStatusHistory.createdAt));
+//     const history = await db
+//       .select({
+//         id: jobStatusHistory.id,
+//         previousStatus: jobStatusHistory.previousStatus,
+//         newStatus: jobStatusHistory.newStatus,
+//         note: jobStatusHistory.note,
+//         createdAt: jobStatusHistory.createdAt,
+//         changedById: jobStatusHistory.changedBy,
+//         changedByEmail: users.email,
+//       })
+//       .from(jobStatusHistory)
+//       .leftJoin(users, eq(users.id, jobStatusHistory.changedBy))
+//       .where(eq(jobStatusHistory.jobId, jobId))
+//       .orderBy(desc(jobStatusHistory.createdAt));
 
-    return res.status(200).json({
-      success: true,
-      job: history,
-    });
-  } catch (error) {
-    console.error('getJobStatusHistory error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to load job status history',
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       job: history,
+//     });
+//   } catch (error) {
+//     console.error('getJobStatusHistory error:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: 'Failed to load job status history',
+//     });
+//   }
+// };
 
-export const getJobItemDetailedStatusHistory = async (req: Request,res: Response,) => {
-  try {
-    const jobItemId = String(req.params.jobId);
+// export const getJobItemDetailedStatusHistory = async (req: Request,res: Response,) => {
+//   try {
+//     const jobItemId = String(req.params.jobId);
     
 
-    const [job] = await db
-      .select({ id: jobItems.id })
-      .from(jobItems)
-      .where(eq(jobItems.id,jobItemId))
-      .limit(1);
+//     const [job] = await db
+//       .select({ id: jobItems.id })
+//       .from(jobItems)
+//       .where(eq(jobItems.id,jobItemId))
+//       .limit(1);
 
-    if (!job) {
-      return res.status(404).json({
-        success: false,
-        error: 'Job not found',
-      });
-    }
+//     if (!job) {
+//       return res.status(404).json({
+//         success: false,
+//         error: 'Job not found',
+//       });
+//     }
 
-    const history = await db
-      .select({
-        id: jobItemStatusHistory.id,
-        previousStatus: jobItemStatusHistory.previousStatus,
-        newStatus: jobItemStatusHistory.newStatus,
-        note: jobItemStatusHistory.note,
-        createdAt: jobItemStatusHistory.createdAt,
-        changedById: jobItemStatusHistory.changedBy,
-        changedByEmail: users.email,
-      })
-      .from(jobItemStatusHistory)
-      .leftJoin(users, eq(users.id, jobItemStatusHistory.changedBy))
-      .where(eq(jobItemStatusHistory.jobItemId, jobItemId))
-      .orderBy(desc(jobItemStatusHistory.createdAt));
+//     const history = await db
+//       .select({
+//         id: jobItemStatusHistory.id,
+//         previousStatus: jobItemStatusHistory.previousStatus,
+//         newStatus: jobItemStatusHistory.newStatus,
+//         note: jobItemStatusHistory.note,
+//         createdAt: jobItemStatusHistory.createdAt,
+//         changedById: jobItemStatusHistory.changedBy,
+//         changedByEmail: users.email,
+//       })
+//       .from(jobItemStatusHistory)
+//       .leftJoin(users, eq(users.id, jobItemStatusHistory.changedBy))
+//       .where(eq(jobItemStatusHistory.jobItemId, jobItemId))
+//       .orderBy(desc(jobItemStatusHistory.createdAt));
 
-    return res.status(200).json({
-      success: true,
-      jobItems: history,
-    });
-  } catch (error) {
-    console.error('getJobItemStatusHistory error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to load jobItem status history',
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       jobItems: history,
+//     });
+//   } catch (error) {
+//     console.error('getJobItemStatusHistory error:', error);
+//     return res.status(500).json({
+//       success: false,
+//       error: 'Failed to load jobItem status history',
+//     });
+//   }
+// };
 
 
 

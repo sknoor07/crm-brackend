@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { estimatedComponentSchema } from '../customerService/cs.validation.js';
-
+import { gstinSchema } from '../customer/customer.validation.js';
+import { createSelectSchema } from "drizzle-zod";
+import { jobs } from '../../db/schema/jobs.js';
+import { jobItems } from '../../db/schema/job-items.js';
 
 
 export const createJobSchema = z.object({
@@ -93,6 +96,9 @@ export const jobSchema = z.object({
   paymentConfirmed: z.boolean(),
 });
 
+export type JobSchema =
+  z.infer<typeof jobSchema>;
+
 export const jobItemSchema = z.object({
   id: z.string().uuid(),
   jobId: z.string().uuid(),
@@ -120,28 +126,66 @@ export const jobItemSchema = z.object({
   serviceChargeApplied: z.string().nullable(),
 });
 
-export type JobSchema =
-  z.infer<typeof jobSchema>;
-
-  export type JobItemSchema =
+export type JobItemSchema =
   z.infer<typeof jobItemSchema>;
 
-  export const jobWithJobItemResponse = z.object({
-    job:jobSchema,
-    jobItems:z.array(jobItemSchema),
-  })
 
-    export type JobWithJobItemResponse =
-  z.infer<typeof jobWithJobItemResponse>;
 
-  export const jobWithJobItemsResponse = z.array(
-  jobWithJobItemResponse
-);
+export const getJobWithItemsQuerySchema = z.object({
+  page: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(20),
+  search: z.string()
+    .trim()
+    .optional()
+    .default(""),
+});
 
-export type JobWithJobItemsResponse =
-  z.infer<typeof jobWithJobItemsResponse>;
+export type GetJobWithItemsQuery = z.infer<typeof getJobWithItemsQuerySchema>;
 
-export type GetJobWithItemsResponse = {
-  message: string;
-  result: JobWithJobItemResponse[];
-};
+const baseJobSchema = createSelectSchema(jobs);
+const baseJobItemSchema = createSelectSchema(jobItems);
+export const mappedCustomerSchema = z.object({
+  firstName: z.string(),
+  lastName: z.string(),
+  phone: z.string(),
+  email: z.string(),
+  billingAddress: z.string().nullable().optional(),
+  gstin: z.string().nullable().optional(),
+});
+
+// 3. Define the pagination schema
+export const paginationSchema = z.object({
+  page: z.number().int().min(1),
+  limit: z.number().int().min(1),
+  total: z.number().int().min(0),
+  totalPages: z.number().int().min(0),
+  hasNextPage: z.boolean(),
+  hasPreviousPage: z.boolean(), // Note: kept your original spelling from the controller
+});
+
+// 4. Combine them into the final Response Schema
+export const getJobWithItemsResponseSchema = z.object({
+  message: z.string(),
+  result: z.array(
+    z.object({
+      job: baseJobSchema,
+      customer: mappedCustomerSchema,
+      jobItems: z.array(baseJobItemSchema),
+    })
+  ),
+  pagination: paginationSchema,
+});
+
+// Export the inferred TypeScript type for your frontend or Swagger docs
+export type GetJobWithItemsResponse = z.infer<typeof getJobWithItemsResponseSchema>;

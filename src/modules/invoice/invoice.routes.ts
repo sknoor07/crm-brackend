@@ -15,7 +15,7 @@ router.use(requireAuth);
 
 router.get(
   '/:invoiceId/download',
-   requireRole(['customer']),
+   requireRole(['customer','customer_service',]),
   downloadInvoice,
 );
 

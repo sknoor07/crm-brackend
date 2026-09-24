@@ -3,6 +3,7 @@ import { Router } from 'express';
 import {
   // createJobByCS,
    getDeviceCategories,
+  getJobDetails,
   getJobWithItems,
 } from './jobs.controller.js';
 
@@ -19,26 +20,11 @@ import {
   requireAuth,
   requireRole,
 } from '../../shared/middleware/auth.js';
-import { getJobDetailedStatusHistory, getJobItemDetailedStatusHistory, listJobs } from './read.controller.js';
+import { listJobs } from './read.controller.js';
 
 const router = Router();
 
 router.use(requireAuth);
-
-router.get(
-  '/recent',
-  requireRole([
-    'admin',
-    'customer_service',
-    'transport_manager',
-    'transport_team_person',
-    'repair_manager',
-    'repair_person',
-    'customer',
-  ]),
-  listJobs,
-);
-
 router.get(
   '/device-categories',
   requireRole([
@@ -58,21 +44,45 @@ router.get(
 )
 
 router.get(
-  '/:jobId/detailed-job-status-history',
+  '/:jobNumber/details',
   requireRole([
     'admin',
     'customer_service',
   ]),
-  getJobDetailedStatusHistory,
+  getJobDetails,
 );
+
+
+/////////////////////////////////////////////done ///////////////////////////////////////
+
+
+
+
+
+
+
+
+//////////////////////////////////pending///////////////////////////////////////////////
 router.get(
-  '/:jobItemId/detailed-item-status-history',
+  '/recent',
   requireRole([
     'admin',
     'customer_service',
+    'transport_manager',
+    'transport_team_person',
+    'repair_manager',
+    'repair_person',
+    'customer',
   ]),
-  getJobItemDetailedStatusHistory,
+  listJobs,
 );
+
+
+
+
+
+
+
 // router.get(
 //   '/:jobId',
 //   requireRole([

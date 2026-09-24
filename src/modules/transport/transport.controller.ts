@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   sql,
 } from 'drizzle-orm';
 
@@ -260,11 +261,11 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
     if (itemsWaitingForTransport.length === 0) {
       return res.status(400).json({ error: 'Job has no items waiting for transport.', });
     }
-    const[transportPersonDetails]= await db.select({email:users.email,fName:employeeProfiles.firstName,lName:employeeProfiles.lastName}).from(users).leftJoin(employeeProfiles,eq(users.id,employeeProfiles.userId)).where(eq(users.id,transportPersonId)).limit(1);
+    const [transportPersonDetails] = await db.select({ email: users.email, fName: employeeProfiles.firstName, lName: employeeProfiles.lastName }).from(users).leftJoin(employeeProfiles, eq(users.id, employeeProfiles.userId)).where(eq(users.id, transportPersonId)).limit(1);
     /* -----------------------------------------------------
        Assign transport person
        ----------------------------------------------------- */
-
+    const safeComment = comment?.trim() || "";
     const result = await db.transaction(
       async (tx) => {
         const updatedJob = await transitionJob({
@@ -272,14 +273,31 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
           previousStatus: job.currentStatus,
           newStatus: 'pending_visit',
           changedBy: transportManagerId,
-          note: `Job Assigned to pickup Person i.e. ${transportPersonDetails.email}, ${transportPersonDetails.fName, transportPersonDetails.lName}`,
-          comment:comment.trim()??"",
+          note: `Job assigned to pickup person: ${transportPersonDetails.email}, ${transportPersonDetails.fName} ${transportPersonDetails.lName}`,
+          comment: safeComment ?? "",
           existingTx: tx,
 
 
           updateJob: async (tx) => {
-            const [updated] = await tx.update(jobs).set({ transportManagerId, assignedTransportTeamPersonId: transportPersonId, currentStatus: 'pending_visit', updatedAt: new Date(), })
-              .where(eq(jobs.id, jobId),).returning();
+            const [updated] = await tx
+              .update(jobs)
+              .set({
+                transportManagerId,
+                assignedTransportTeamPersonId: transportPersonId,
+                currentStatus: 'pending_visit',
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(jobs.id, jobId),
+                  eq(
+                    jobs.currentStatus,
+                    'assigning_pickup_Engineer',
+                  ),
+                  isNull(jobs.assignedTransportTeamPersonId),
+                ),
+              )
+              .returning();
             if (!updated) {
               throw new Error('Failed to update job',);
             }
@@ -298,7 +316,15 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
 
             async (tx) => {
               const [updated] = await tx.update(jobItems).set({ currentStatus: 'transport_visit_in_progress', updatedAt: new Date(), })
-                .where(eq(jobItems.id, item.id),).returning();
+                .where(
+                  and(
+                    eq(jobItems.id, item.id),
+                    eq(
+                      jobItems.currentStatus,
+                      'approved_for_transport',
+                    ),
+                  ),
+                ).returning();
               if (!updated) {
                 throw new Error('Failed to Update Job Items');
               }
@@ -316,7 +342,7 @@ export const assignTransportPerson = async (req: Request<{}, {}, AssignTransport
       },
 
     );
-    return res.status(200).json({ status:"success",message: 'Transport person assigned successfully.'});
+    return res.status(200).json({ status: "success", message: 'Transport person assigned successfully.' });
 
 
   } catch (error) {
@@ -359,30 +385,30 @@ export const getPickUpPersonList = async (req: Request, res: Response) => {
 
 
 
-export const getJobsWaitingLabReceipt = async (req: Request, res:Response)=>{
-  try{
-  const user = req.user;
-  if(!user){
-    res.status(401).json(new Error('Authorised User Not found'));
-  }
-  const rows= await db.select({jobs,items:jobItems}).from(jobs).leftJoin(jobItems,eq(jobItems.jobId,jobs.id)).where(and(eq(jobs.currentStatus,'going_to_lab'),eq(jobItems.currentStatus,"pending_lab_receipt")));
-  
-  const jobMap= new Map<string,{job:typeof rows[number]['jobs']; item:NonNullable<typeof rows[number]['items']>[]}>();
+export const getJobsWaitingLabReceipt = async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json(new Error('Authorised User Not found'));
+    }
+    const rows = await db.select({ jobs, items: jobItems }).from(jobs).leftJoin(jobItems, eq(jobItems.jobId, jobs.id)).where(and(eq(jobs.currentStatus, 'going_to_lab'), eq(jobItems.currentStatus, "pending_lab_receipt")));
 
-  for(const row of rows){
-    const jobId=row.jobs.id;
-    if(!jobMap.has(jobId)){
-      jobMap.set(jobId,{job:row.jobs,item:[]})
+    const jobMap = new Map<string, { job: typeof rows[number]['jobs']; item: NonNullable<typeof rows[number]['items']>[] }>();
+
+    for (const row of rows) {
+      const jobId = row.jobs.id;
+      if (!jobMap.has(jobId)) {
+        jobMap.set(jobId, { job: row.jobs, item: [] })
+      }
+      if (row.items) {
+        jobMap.get(jobId)?.item.push(row.items)
+      }
     }
-    if(row.items){
-      jobMap.get(jobId)?.item.push(row.items)
-    }
+    const result = Array.from(jobMap.values()); ''
+    res.status(200).json({ result });
+  } catch (err) {
+    res.status(500).json({ error: err, message: "Problem with Getting Jobs on the way to lab" });
   }
-  const result= Array.from(jobMap.values());''
-  res.status(200).json({result});
-}catch(err){
-  res.status(500).json({error:err, message:"Problem with Getting Jobs on the way to lab"});
-}
 
 }
 
@@ -455,7 +481,7 @@ export const receiveAtLab = async (
        Find items
        ----------------------------------------------------- */
 
-   const existingItems: (typeof jobItems.$inferSelect)[] = [];
+    const existingItems: (typeof jobItems.$inferSelect)[] = [];
 
     for (const id of itemIds) {
       const [item] = await db
@@ -567,142 +593,142 @@ export const receiveAtLab = async (
 
     const result = await db.transaction(async (tx) => {
 
-  /* -----------------------------------------------------
-     1. Update job
-     ----------------------------------------------------- */
+      /* -----------------------------------------------------
+         1. Update job
+         ----------------------------------------------------- */
 
-  const updatedJob = await transitionJob({
-    jobId: job.id,
-    previousStatus: job.currentStatus,
-    newStatus: 'repair_in_progress',
-    changedBy: transportManagerId,
-    note:
-      comment?.trim() ||
-      'Item received at lab. Repair can proceed.',
+      const updatedJob = await transitionJob({
+        jobId: job.id,
+        previousStatus: job.currentStatus,
+        newStatus: 'repair_in_progress',
+        changedBy: transportManagerId,
+        note:
+          comment?.trim() ||
+          'Item received at lab. Repair can proceed.',
 
-    updateJob: async (transaction) => {
-      const [updated] = await transaction
-        .update(jobs)
-        .set({
-          currentStatus: 'repair_in_progress',
-          updatedAt: new Date(),
-        })
-        .where(eq(jobs.id, job.id))
-        .returning();
-
-      if (!updated) {
-        throw new Error(
-          `Failed to update job ${job.id}`,
-        );
-      }
-
-      return updated;
-    },
-
-    existingTx: tx,
-  });
-
-
-  /* -----------------------------------------------------
-     2. Update items
-     ----------------------------------------------------- */
-
-  const updatedItems:
-    (typeof jobItems.$inferSelect)[] = [];
-
-  for (const item of existingItems) {
-
-    const updatedItem =
-      await updateJobItemWithStatusTransition(
-        item.id,
-        item.currentStatus as JobItemStatus,
-        'received_at_lab',
-
-        async (transaction) => {
-          const [updated] =
-            await transaction
-              .update(jobItems)
-              .set({
-                currentStatus:
-                  'received_at_lab',
-
-                onsiteRepairAuthorized:
-                  false,
-
-                inlabRepairAuthorized:
-                  true,
-
-                updatedAt:
-                  new Date(),
-              })
-              .where(
-                eq(
-                  jobItems.id,
-                  item.id,
-                ),
-              )
-              .returning();
+        updateJob: async (transaction) => {
+          const [updated] = await transaction
+            .update(jobs)
+            .set({
+              currentStatus: 'repair_in_progress',
+              updatedAt: new Date(),
+            })
+            .where(eq(jobs.id, job.id))
+            .returning();
 
           if (!updated) {
             throw new Error(
-              `Failed to update job item ${item.id}`,
+              `Failed to update job ${job.id}`,
             );
           }
 
           return updated;
         },
 
-        transportManagerId,
-
-        comment?.trim() ||
-          'Item received at the lab.',
-
-        tx,
-      );
-
-    updatedItems.push(updatedItem);
-  }
+        existingTx: tx,
+      });
 
 
-  /* -----------------------------------------------------
-     3. Job-level comment
-     ----------------------------------------------------- */
+      /* -----------------------------------------------------
+         2. Update items
+         ----------------------------------------------------- */
 
-  await tx
-    .insert(jobComments)
-    .values({
-      jobId: job.id,
-      jobItemId: null,
-      userId: transportManagerId,
-      comment:
-        comment?.trim() ||
-        (
-          updatedItems.length === 1
-            ? 'Item received at the lab.'
-            : `${updatedItems.length} items received at the lab.`
-        ),
+      const updatedItems:
+        (typeof jobItems.$inferSelect)[] = [];
+
+      for (const item of existingItems) {
+
+        const updatedItem =
+          await updateJobItemWithStatusTransition(
+            item.id,
+            item.currentStatus as JobItemStatus,
+            'received_at_lab',
+
+            async (transaction) => {
+              const [updated] =
+                await transaction
+                  .update(jobItems)
+                  .set({
+                    currentStatus:
+                      'received_at_lab',
+
+                    onsiteRepairAuthorized:
+                      false,
+
+                    inlabRepairAuthorized:
+                      true,
+
+                    updatedAt:
+                      new Date(),
+                  })
+                  .where(
+                    eq(
+                      jobItems.id,
+                      item.id,
+                    ),
+                  )
+                  .returning();
+
+              if (!updated) {
+                throw new Error(
+                  `Failed to update job item ${item.id}`,
+                );
+              }
+
+              return updated;
+            },
+
+            transportManagerId,
+
+            comment?.trim() ||
+            'Item received at the lab.',
+
+            tx,
+          );
+
+        updatedItems.push(updatedItem);
+      }
+
+
+      /* -----------------------------------------------------
+         3. Job-level comment
+         ----------------------------------------------------- */
+
+      await tx
+        .insert(jobComments)
+        .values({
+          jobId: job.id,
+          jobItemId: null,
+          userId: transportManagerId,
+          comment:
+            comment?.trim() ||
+            (
+              updatedItems.length === 1
+                ? 'Item received at the lab.'
+                : `${updatedItems.length} items received at the lab.`
+            ),
+        });
+
+
+      return {
+        job: updatedJob,
+        items: updatedItems,
+      };
     });
 
+    /* -----------------------------------------------------
+       Response
+       ----------------------------------------------------- */
 
-  return {
-    job: updatedJob,
-    items: updatedItems,
-  };
-});
-
-/* -----------------------------------------------------
-   Response
-   ----------------------------------------------------- */
-
-return res.status(200).json({
-  message:
-    result.items.length === 1
-      ? 'Item successfully received at the lab.'
-      : 'Items successfully received at the lab.',
-  count: result.items.length,
-  jobsAffected: result.items.length,
-  data: result,
-});
+    return res.status(200).json({
+      message:
+        result.items.length === 1
+          ? 'Item successfully received at the lab.'
+          : 'Items successfully received at the lab.',
+      count: result.items.length,
+      jobsAffected: result.items.length,
+      data: result,
+    });
   } catch (error) {
     console.error(
       'Receive item at lab error:',
@@ -716,30 +742,30 @@ return res.status(200).json({
   }
 };
 
-export const getJobsreceivedAtLab= async(req:Request,res:Response)=>{
-  try{
-  const user = req.user;
-  if(!user){
-    res.status(401).json(new Error('Authorised User Not found'));
-  }
-  const rows= await db.select({jobs,items:jobItems}).from(jobs).leftJoin(jobItems,eq(jobItems.jobId,jobs.id)).where(and(eq(jobs.currentStatus,'repair_in_progress'),eq(jobItems.currentStatus,"received_at_lab")));
-  
-  const jobMap= new Map<string,{job:typeof rows[number]['jobs']; item:NonNullable<typeof rows[number]['items']>[]}>();
+export const getJobsreceivedAtLab = async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json(new Error('Authorised User Not found'));
+    }
+    const rows = await db.select({ jobs, items: jobItems }).from(jobs).leftJoin(jobItems, eq(jobItems.jobId, jobs.id)).where(and(eq(jobs.currentStatus, 'repair_in_progress'), eq(jobItems.currentStatus, "received_at_lab")));
 
-  for(const row of rows){
-    const jobId=row.jobs.id;
-    if(!jobMap.has(jobId)){
-      jobMap.set(jobId,{job:row.jobs,item:[]})
+    const jobMap = new Map<string, { job: typeof rows[number]['jobs']; item: NonNullable<typeof rows[number]['items']>[] }>();
+
+    for (const row of rows) {
+      const jobId = row.jobs.id;
+      if (!jobMap.has(jobId)) {
+        jobMap.set(jobId, { job: row.jobs, item: [] })
+      }
+      if (row.items) {
+        jobMap.get(jobId)?.item.push(row.items)
+      }
     }
-    if(row.items){
-      jobMap.get(jobId)?.item.push(row.items)
-    }
+    const result = Array.from(jobMap.values()); ''
+    res.status(200).json({ result });
+  } catch (err) {
+    res.status(500).json({ error: err, message: "Problem with Getting Jobs on the way to lab" });
   }
-  const result= Array.from(jobMap.values());''
-  res.status(200).json({result});
-}catch(err){
-  res.status(500).json({error:err, message:"Problem with Getting Jobs on the way to lab"});
-}
 }
 
 const isActiveRepairManager = async (
@@ -825,7 +851,7 @@ export const getRepairManagers = async (
   }
 };
 
-export const assignRepairManager = async (req: Request<{},{},AssignRepairManagerInput>,res: Response,) => {
+export const assignRepairManager = async (req: Request<{}, {}, AssignRepairManagerInput>, res: Response,) => {
   try {
     const {
       jobId,
@@ -974,7 +1000,7 @@ export const assignRepairManager = async (req: Request<{},{},AssignRepairManager
             },
             transportManagerId,
             comment ||
-              'Item assigned to Repair Team Manager',
+            'Item assigned to Repair Team Manager',
             tx,
           );
         }

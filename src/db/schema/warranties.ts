@@ -2,34 +2,82 @@ import {
   pgTable,
   uuid,
   varchar,
-  text,
   timestamp,
-} from 'drizzle-orm/pg-core';
+  integer,
+  pgEnum,
+  index,
+} from "drizzle-orm/pg-core";
 
-import { jobItems } from './job-items.js';
+import { jobItems } from "./job-items.js";
+import { jobItemQuoteLines } from "./job-item-quote-lines.js";
+import { jobs } from "./jobs.js";
 
-export const warranties = pgTable('warranties', {
-  id: uuid('id').defaultRandom().primaryKey(),
+export const warrantyStatusValues = [
+  "active",
+  "expired",
+  "void",
+  "completed",
+] as const;
 
-  jobItemId: uuid('job_item_id').references(() => jobItems.id).notNull().unique(),
+export const warrantyStatus = pgEnum(
+  "warranty_status",
+  warrantyStatusValues,
+);
 
-  deviceSerialNumber: varchar('device_serial_number',{length: 50,},).notNull(),
+export const warranties = pgTable(
+  "warranties",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
 
-  deviceImei: varchar('device_imei',{length: 50,},),
+    jobId: uuid("job_id")
+      .references(() => jobs.id)
+      .notNull(),
 
-  originalRepairDate: timestamp('original_repair_date',).notNull(),
+    jobItemId: uuid("job_item_id")
+      .references(() => jobItems.id)
+      .notNull(),
 
-  warrantyStart: timestamp('warranty_start',).defaultNow(),
+    quoteLineId: uuid("quote_line_id")
+      .references(() => jobItemQuoteLines.id)
+      .notNull()
+      .unique(),
 
-  warrantyEnd: timestamp('warranty_end',).notNull(),
+    componentName: varchar("component_name", {
+      length: 200,
+    }).notNull(),
 
-  warrantyStatus: varchar('warranty_status',{length: 20,},).notNull().default('active'),
+    quantity: integer("quantity")
+      .notNull()
+      .default(1),
 
-  reasonForReturn: text('reason_for_return',),
+    deviceSerialNumber: varchar("device_serial_number", {
+      length: 50,
+    }),
 
-  warrantyResult: varchar('warranty_result',{length: 20,},),
+    deviceImei: varchar("device_imei", {
+      length: 50,
+    }),
 
-  createdAt: timestamp('created_at',).defaultNow(),
+    warrantyMonths: integer("warranty_months").notNull(),
 
-  updatedAt: timestamp('updated_at',).defaultNow(),
-});
+    warrantyStart: timestamp("warranty_start").notNull(),
+
+    warrantyEnd: timestamp("warranty_end").notNull(),
+
+    warrantyStatus: warrantyStatus("warranty_status")
+      .notNull()
+      .default("active"),
+
+    createdAt: timestamp("created_at")
+      .defaultNow()
+      .notNull(),
+
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    jobIdx: index("warranties_job_idx").on(table.jobId),
+    jobItemIdx: index("warranties_job_item_idx").on(table.jobItemId),
+  }),
+);

@@ -51,7 +51,7 @@ export const getInvoicePdfData = async (
       phone: users.phone,
       firstName: customerProfiles.firstName,
       lastName: customerProfiles.lastName,
-      gstin:customerProfiles.gstin,
+      gstin: customerProfiles.gstin,
       billingAddress:
         customerProfiles.billingAddress,
     })
@@ -160,7 +160,7 @@ export const getInvoicePdfData = async (
       name: `${customer.firstName} ${customer.lastName}`,
 
       email: customer.email,
-      gstin:customer.gstin,
+      gstin: customer.gstin,
 
       phone: customer.phone,
 
@@ -206,15 +206,16 @@ export const downloadInvoice = async (
     // AUTHENTICATION
     // --------------------------------------------------
 
-    const customerId = req.user?.userId;
+    const userId = req.user?.userId;
+    const roleName = req.user?.roles;
 
-    if (!customerId) {
+    if (!userId) {
       return res.status(401).json({
-        status: 'error',
-        message: 'Unauthorized',
+        status: "error",
+        message: "Unauthorized",
       });
     }
-
+    
     // --------------------------------------------------
     // INVOICE ID
     // --------------------------------------------------
@@ -245,6 +246,7 @@ export const downloadInvoice = async (
         ),
       )
       .limit(1);
+      
 
     if (!invoice) {
       return res.status(404).json({
@@ -257,15 +259,20 @@ export const downloadInvoice = async (
     // OWNERSHIP CHECK
     // --------------------------------------------------
 
+    const isCustomer = roleName?.some((role) => role === "customer");
+    const isCustomerService = roleName?.some((role) => role === 'customer_service');
+
     if (
-      invoice.customerId !== customerId
+      isCustomer &&
+      invoice.customerId !== userId
     ) {
       return res.status(403).json({
-        status: 'error',
+        status: "error",
         message:
-          'You are not allowed to access this invoice.',
+          "You are not allowed to access this invoice.",
       });
     }
+
 
     // --------------------------------------------------
     // CHECK PDF
