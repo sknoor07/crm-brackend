@@ -11,6 +11,7 @@ export const buildQuoteLineValues = (quoteId, components) => {
             name: component.name,
             quantity,
             unitPrice: moneyString(unitPrice),
+            warrantyMonths: component.warrantyMonths ?? 0,
             lineTotal: moneyString(lineTotal),
             sortOrder: index,
         };
@@ -37,6 +38,7 @@ export const resolveQuoteComponents = (components, fallbackCost) => {
             name: 'Components',
             quantity: 1,
             unitPrice: fallbackCost,
+            warrantyMonths: 0,
         },
     ];
 };

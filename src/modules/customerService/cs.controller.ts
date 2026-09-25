@@ -63,9 +63,23 @@ const createWarrantiesForClosedJob = async (
     .limit(1);
 
   if (!finalQuote) {
-    throw new Error(
-      "Cannot create warranties because no final quote was found.",
-    );
+     const deliveredItems = await tx
+      .select({ id: jobItems.id })
+      .from(jobItems)
+      .where(
+        and(
+          eq(jobItems.jobId, jobId),
+          eq(jobItems.currentStatus, "delivered"),
+        ),
+      );
+
+    if (deliveredItems.length > 0) {
+      throw new Error(
+        "Cannot create warranties because no final quote was found.",
+      );
+    }
+
+    return;
   }
 
   // --------------------------------------------------

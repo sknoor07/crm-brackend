@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql, } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { jobs, jobItems, jobComments, jobItemStatusHistory, roles, userRoles, users, employeeProfiles, customerProfiles, } from '../../db/schema/index.js';
 import { updateJobItemWithStatusTransition } from '../jobstatusandtransitions/item-status-history.js';
@@ -173,18 +173,27 @@ export const assignTransportPerson = async (req, res) => {
         /* -----------------------------------------------------
            Assign transport person
            ----------------------------------------------------- */
+        const safeComment = comment?.trim() || "";
         const result = await db.transaction(async (tx) => {
             const updatedJob = await transitionJob({
                 jobId: job.id,
                 previousStatus: job.currentStatus,
                 newStatus: 'pending_visit',
                 changedBy: transportManagerId,
-                note: `Job Assigned to pickup Person i.e. ${transportPersonDetails.email}, ${transportPersonDetails.fName, transportPersonDetails.lName}`,
-                comment: comment.trim() ?? "",
+                note: `Job assigned to pickup person: ${transportPersonDetails.email}, ${transportPersonDetails.fName} ${transportPersonDetails.lName}`,
+                comment: safeComment ?? "",
                 existingTx: tx,
                 updateJob: async (tx) => {
-                    const [updated] = await tx.update(jobs).set({ transportManagerId, assignedTransportTeamPersonId: transportPersonId, currentStatus: 'pending_visit', updatedAt: new Date(), })
-                        .where(eq(jobs.id, jobId)).returning();
+                    const [updated] = await tx
+                        .update(jobs)
+                        .set({
+                        transportManagerId,
+                        assignedTransportTeamPersonId: transportPersonId,
+                        currentStatus: 'pending_visit',
+                        updatedAt: new Date(),
+                    })
+                        .where(and(eq(jobs.id, jobId), eq(jobs.currentStatus, 'assigning_pickup_Engineer'), isNull(jobs.assignedTransportTeamPersonId)))
+                        .returning();
                     if (!updated) {
                         throw new Error('Failed to update job');
                     }
@@ -195,7 +204,7 @@ export const assignTransportPerson = async (req, res) => {
             for (const item of itemsWaitingForTransport) {
                 const updatedItem = await updateJobItemWithStatusTransition(item.id, item.currentStatus, 'transport_visit_in_progress', async (tx) => {
                     const [updated] = await tx.update(jobItems).set({ currentStatus: 'transport_visit_in_progress', updatedAt: new Date(), })
-                        .where(eq(jobItems.id, item.id)).returning();
+                        .where(and(eq(jobItems.id, item.id), eq(jobItems.currentStatus, 'approved_for_transport'))).returning();
                     if (!updated) {
                         throw new Error('Failed to Update Job Items');
                     }

@@ -15,7 +15,7 @@ import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
 import technicianRoutes from './modules/transport-team-person/transportPerson.routes.js';
 import otpRoutes from './modules/otp/otp.routes.js';
 import invoiceRoutes from './modules/invoice/invoice.routes.js';
-
+import warrantyRoutes from './modules/warranties/warranty.routes.js'
 
 dotenv.config({ path: '.env.development' });
 
@@ -54,6 +54,7 @@ app.use('/api/v1/comments',commentRoutes);
 app.use('/api/v1/repair', repairRoutes);
 app.use('/api/v1/otp',otpRoutes);
 app.use('/api/v1/invoices',invoiceRoutes,);
+app.use('/api/v1/warranty',warrantyRoutes,);
 
 app.get('/api/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'OK', message: 'API is running smoothly!' });

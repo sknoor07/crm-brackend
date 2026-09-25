@@ -1,0 +1,16 @@
+import { Router } from "express";
+import { createClaim, getWarranty, getWarrantyList, updateClaimInspection } from "./warranty.controller.js";
+import { warrantyIdParamSchema } from "./warranty.validation.js";
+import { validateRequest } from "../../shared/middleware/validateRequest.js";
+
+const router = Router();
+router.post("/:warrantyId/claims",createClaim,);
+router.get("/:warrantyId", validateRequest(warrantyIdParamSchema,"params"), getWarranty);
+
+router.patch("/claims/:claimId/inspection",updateClaimInspection,);
+
+router.get("/", getWarrantyList);
+
+
+
+export default router;

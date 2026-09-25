@@ -35,6 +35,7 @@ export const requireRole = (allowedRoles) => {
         if (!req.user || !req.user.roles) {
             return res.status(403).json({ error: 'Forbidden: No roles assigned' });
         }
+        //console.log(req.user.roles);
         // Check if the user has at least one of the allowed roles
         const hasPermission = req.user.roles.some((role) => {
             return allowedRoles.includes(role);

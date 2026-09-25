@@ -164,15 +164,15 @@ export const customerLogin = async (req: Request<{}, {}, LoginInput>, res: Respo
       });
     }
 
-    const userRoleRows = await db.select({roleName: roles.name,})
+    const userRoleRows = await db.select({ roleName: roles.name, })
       .from(userRoles)
       .innerJoin(roles, eq(userRoles.roleId, roles.id))
       .where(eq(userRoles.userId, user.id));
 
     const roleNames = userRoleRows.map((role) => role.roleName);
-   
-    
-    const [userProfile]= await db.select().from(customerProfiles).where(eq(customerProfiles.userId,user.id)).limit(1);
+
+
+    const [userProfile] = await db.select().from(customerProfiles).where(eq(customerProfiles.userId, user.id)).limit(1);
 
     const isPasswordValid = await comparePasswords(
       password,
@@ -185,10 +185,10 @@ export const customerLogin = async (req: Request<{}, {}, LoginInput>, res: Respo
     }
 
     const { accessToken, refreshToken } =
-  await createLoginSession({
-    userId: user.id,
-    userType: user.userType,
-  });
+      await createLoginSession({
+        userId: user.id,
+        userType: user.userType,
+      });
 
     // 6. Send Refresh Token securely via HTTP-only cookie (14 days)
     res.cookie('refreshToken', refreshToken, {
@@ -421,7 +421,7 @@ export const getAllOrders = async (req: Request, res: Response<{}, CustomerJobs>
         eq(invoices.jobId, jobs.id),
       )
       .where(
-        and(eq(jobs.customerId, customerId),notInArray(jobs.currentStatus, ["closed", "cancelled"]),),
+        and(eq(jobs.customerId, customerId), notInArray(jobs.currentStatus, ["closed", "cancelled"]),),
       ).orderBy(desc(jobs.updatedAt));
 
     const jobsMap = new Map<string, CustomerJob>();
@@ -555,7 +555,7 @@ export const getOrderHistory = async (req: Request, res: Response<{}, CustomerJo
         eq(invoices.jobId, jobs.id),
       )
       .where(
-        and(eq(jobs.customerId, customerId),eq(jobs.currentStatus,"closed")),
+        and(eq(jobs.customerId, customerId), eq(jobs.currentStatus, "closed")),
       ).orderBy(desc(jobs.updatedAt));
 
     const jobsMap = new Map<string, CustomerJob>();
@@ -1318,6 +1318,9 @@ export const getCustomerPendingQuotes = async (req: Request, res: Response,) => 
 
                         lineTotal:
                           line.lineTotal,
+                          
+                        warrantyMonths:
+                          line.warrantyMonths,
                       }),
                     ),
 
@@ -1347,10 +1350,10 @@ export const getCustomerPendingQuotes = async (req: Request, res: Response,) => 
               quote.serviceCharge,
             discount:
               quote.discount,
-            cgst:quote.cgst,
-            sgst:quote.sgst,
-            igst:quote.igst,
-            gstType:quote.gstType,
+            cgst: quote.cgst,
+            sgst: quote.sgst,
+            igst: quote.igst,
+            gstType: quote.gstType,
             totalAmount:
               quote.totalAmount,
             createdByUserId:
@@ -1427,25 +1430,25 @@ export const updateCustomerProfile = async (req: Request<{}, {}, CustomerProfile
           phone: data.phoneNumber,
           firstName: data.firstName,
           lastName: data.lastName,
-          gstin:data.gstin,
+          gstin: data.gstin,
           billingAddress: data.billingAddress
         })
         .where(eq(customerProfiles.userId, userId))
         .returning();
 
       return {
-        updatedInfo:{
+        updatedInfo: {
           email: userResult[0].email,
           phone: userResult[0].phone,
-          gstin:profileResult[0].gstin,
+          gstin: profileResult[0].gstin,
           firstName: profileResult[0].firstName,
-          lastName:profileResult[0].lastName,
-          billingAddress:profileResult[0].billingAddress,
+          lastName: profileResult[0].lastName,
+          billingAddress: profileResult[0].billingAddress,
         }
       };
     });
 
-    res.status(200).json({ message: "Profile Fetched Successfully", result});
+    res.status(200).json({ message: "Profile Fetched Successfully", result });
   } catch (err) {
     res.status(404).json({ message: "Profiel cannot be fecthed" })
   }

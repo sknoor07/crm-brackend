@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { estimatedComponentSchema } from '../customerService/cs.validation.js';
+import { createSelectSchema } from "drizzle-zod";
+import { jobs } from '../../db/schema/jobs.js';
+import { jobItems } from '../../db/schema/job-items.js';
 export const createJobSchema = z.object({
     // Customer details
     customerEmail: z
@@ -84,8 +87,51 @@ export const jobItemSchema = z.object({
     baseRepairCost: z.string().nullable(),
     serviceChargeApplied: z.string().nullable(),
 });
-export const jobWithJobItemResponse = z.object({
-    job: jobSchema,
-    jobItems: z.array(jobItemSchema),
+export const getJobWithItemsQuerySchema = z.object({
+    page: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .default(1),
+    limit: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(20),
+    search: z.string()
+        .trim()
+        .optional()
+        .default(""),
 });
-export const jobWithJobItemsResponse = z.array(jobWithJobItemResponse);
+const baseJobSchema = createSelectSchema(jobs);
+const baseJobItemSchema = createSelectSchema(jobItems);
+export const mappedCustomerSchema = z.object({
+    firstName: z.string(),
+    lastName: z.string(),
+    phone: z.string(),
+    email: z.string(),
+    billingAddress: z.string().nullable().optional(),
+    gstin: z.string().nullable().optional(),
+});
+// 3. Define the pagination schema
+export const paginationSchema = z.object({
+    page: z.number().int().min(1),
+    limit: z.number().int().min(1),
+    total: z.number().int().min(0),
+    totalPages: z.number().int().min(0),
+    hasNextPage: z.boolean(),
+    hasPreviousPage: z.boolean(), // Note: kept your original spelling from the controller
+});
+// 4. Combine them into the final Response Schema
+export const getJobWithItemsResponseSchema = z.object({
+    message: z.string(),
+    result: z.array(z.object({
+        job: baseJobSchema,
+        customer: mappedCustomerSchema,
+        jobItems: z.array(baseJobItemSchema),
+    })),
+    pagination: paginationSchema,
+});

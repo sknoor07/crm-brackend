@@ -119,11 +119,12 @@ export const downloadInvoice = async (req, res) => {
         // --------------------------------------------------
         // AUTHENTICATION
         // --------------------------------------------------
-        const customerId = req.user?.userId;
-        if (!customerId) {
+        const userId = req.user?.userId;
+        const roleName = req.user?.roles;
+        if (!userId) {
             return res.status(401).json({
-                status: 'error',
-                message: 'Unauthorized',
+                status: "error",
+                message: "Unauthorized",
             });
         }
         // --------------------------------------------------
@@ -154,10 +155,13 @@ export const downloadInvoice = async (req, res) => {
         // --------------------------------------------------
         // OWNERSHIP CHECK
         // --------------------------------------------------
-        if (invoice.customerId !== customerId) {
+        const isCustomer = roleName?.some((role) => role === "customer");
+        const isCustomerService = roleName?.some((role) => role === 'customer_service');
+        if (isCustomer &&
+            invoice.customerId !== userId) {
             return res.status(403).json({
-                status: 'error',
-                message: 'You are not allowed to access this invoice.',
+                status: "error",
+                message: "You are not allowed to access this invoice.",
             });
         }
         // --------------------------------------------------

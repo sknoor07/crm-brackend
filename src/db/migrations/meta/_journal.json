@@ -57,6 +57,13 @@
       "when": 1790155589883,
       "tag": "0007_hot_ulik",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790318498275,
+      "tag": "0008_icy_red_ghost",
+      "breakpoints": true
     }
   ]
 }

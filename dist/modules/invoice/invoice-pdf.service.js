@@ -1,13 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import puppeteer from 'puppeteer';
-import { invoices } from '../../db/schema/invoices.js';
-import { eq } from 'drizzle-orm';
-import { db } from '../../config/database.js';
-import { jobs } from '../../db/schema/jobs.js';
-import { customerProfiles, users } from '../../db/schema/users.js';
-import { invoiceItems } from '../../db/schema/invoice-items.js';
-import { jobItems } from '../../db/schema/job-items.js';
 import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const signaturePath = path.join(__dirname, 'assets', 'signature.png');
@@ -233,105 +226,4 @@ export const generateInvoicePdf = async (data) => {
     finally {
         await browser.close();
     }
-};
-export const getInvoicePdfData = async (invoiceId) => {
-    // -----------------------------------------------
-    // 1. Find invoice
-    // -----------------------------------------------
-    const [invoice] = await db
-        .select()
-        .from(invoices)
-        .where(eq(invoices.id, invoiceId))
-        .limit(1);
-    if (!invoice)
-        throw new Error('Invoice not found');
-    // -----------------------------------------------
-    // 2. Find job
-    // -----------------------------------------------
-    const [job] = await db
-        .select()
-        .from(jobs)
-        .where(eq(jobs.id, invoice.jobId))
-        .limit(1);
-    if (!job)
-        throw new Error('Job not found for invoice');
-    // -----------------------------------------------
-    // 3. Find customer
-    // -----------------------------------------------
-    const [customer] = await db
-        .select({
-        email: users.email,
-        phone: users.phone,
-        firstName: customerProfiles.firstName,
-        lastName: customerProfiles.lastName,
-        billingAddress: customerProfiles.billingAddress,
-        gstin: customerProfiles.gstin,
-    })
-        .from(users)
-        .leftJoin(customerProfiles, eq(customerProfiles.userId, users.id))
-        .where(eq(users.id, invoice.customerId))
-        .limit(1);
-    if (!customer)
-        throw new Error('Customer not found for invoice');
-    // -----------------------------------------------
-    // 4. Find invoice items + job items
-    // -----------------------------------------------
-    const rows = await db
-        .select({
-        invoiceItem: invoiceItems,
-        jobItem: jobItems,
-    })
-        .from(invoiceItems)
-        .innerJoin(jobItems, eq(invoiceItems.jobItemId, jobItems.id))
-        .where(eq(invoiceItems.invoiceId, invoice.id));
-    // -----------------------------------------------
-    // 5. Group invoice items by job item
-    // -----------------------------------------------
-    const groupedItems = new Map();
-    for (const row of rows) {
-        const jobItem = row.jobItem;
-        const invoiceItem = row.invoiceItem;
-        if (!groupedItems.has(jobItem.id)) {
-            groupedItems.set(jobItem.id, {
-                deviceName: jobItem.deviceName,
-                deviceCategory: jobItem.deviceCategory,
-                serialNumber: jobItem.deviceSerialNumber,
-                components: [],
-            });
-        }
-        groupedItems.get(jobItem.id).components.push({
-            name: invoiceItem.name,
-            quantity: invoiceItem.quantity,
-            unitPrice: invoiceItem.unitPrice,
-            lineTotal: invoiceItem.lineTotal,
-            warrantyMonths: invoiceItem.warrantyMonths,
-        });
-    }
-    // -----------------------------------------------
-    // 6. Return PDF-ready data
-    // -----------------------------------------------
-    return {
-        invoiceNumber: invoice.invoiceNumber,
-        invoiceDate: invoice.createdAt
-            ? invoice.createdAt.toISOString()
-            : new Date().toISOString(),
-        customer: {
-            name: `${customer.firstName} ${customer.lastName}`,
-            email: customer.email,
-            phone: customer.phone,
-            billingAddress: customer.billingAddress,
-            gstin: customer.gstin ?? "",
-        },
-        job: { jobNumber: job.jobNumber },
-        items: Array.from(groupedItems.values()),
-        subtotal: invoice.subtotal,
-        serviceCharge: invoice.serviceCharge,
-        discount: invoice.discount,
-        cgst: invoice.cgst,
-        sgst: invoice.sgst,
-        igst: invoice.igst,
-        gstType: invoice.gstType,
-        totalAmount: invoice.totalAmount,
-        currency: invoice.currency,
-    };
 };

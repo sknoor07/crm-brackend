@@ -4,5 +4,5 @@ import { downloadInvoice, } from './invoice.controller.js';
 import { requireAuth, requireRole } from '../../shared/middleware/auth.js';
 const router = Router();
 router.use(requireAuth);
-router.get('/:invoiceId/download', requireRole(['customer']), downloadInvoice);
+router.get('/:invoiceId/download', requireRole(['customer', 'customer_service',]), downloadInvoice);
 export default router;

@@ -21,8 +21,16 @@ export const transitionJob = async ({ jobId, previousStatus, newStatus, changedB
     // Execute transition
     // --------------------------------------------------
     const executeTransition = async (tx) => {
-        // Update job
+        /*
+         * IMPORTANT:
+         *
+         * updateJob MUST only update the row if its current
+         * status is still effectivePreviousStatus.
+         */
         const updatedJob = await updateJob(tx);
+        if (!updatedJob) {
+            throw new Error(`Job transition failed. Job may have already been changed from '${effectivePreviousStatus}'.`);
+        }
         // --------------------------------------------------
         // Status history
         // --------------------------------------------------
@@ -30,7 +38,6 @@ export const transitionJob = async ({ jobId, previousStatus, newStatus, changedB
             .insert(jobStatusHistory)
             .values({
             jobId,
-            // Never insert null.
             previousStatus: effectivePreviousStatus,
             newStatus,
             changedBy,
@@ -40,15 +47,16 @@ export const transitionJob = async ({ jobId, previousStatus, newStatus, changedB
         // --------------------------------------------------
         // Job-level comment
         // --------------------------------------------------
-        await tx
-            .insert(jobComments)
-            .values({
-            jobId,
-            jobItemId: null,
-            userId: changedBy,
-            comment: comment ??
-                `Job status changed from ${effectivePreviousStatus} to ${newStatus}`,
-        });
+        if (comment?.trim()) {
+            await tx
+                .insert(jobComments)
+                .values({
+                jobId,
+                jobItemId: null,
+                userId: changedBy,
+                comment: comment.trim(),
+            });
+        }
         return updatedJob;
     };
     // --------------------------------------------------

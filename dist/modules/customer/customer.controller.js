@@ -180,9 +180,6 @@ export const createCustomerJob = async (req, res) => {
         const jobId = crypto.randomUUID();
         const jobNumber = generateJobNumber();
         const result = await db.transaction(async (tx) => {
-            // --------------------------------------------------
-            // 1. CREATE JOB
-            // --------------------------------------------------
             const [job] = await tx
                 .insert(jobs)
                 .values({
@@ -192,22 +189,6 @@ export const createCustomerJob = async (req, res) => {
                 currentStatus: 'created',
             })
                 .returning();
-            // --------------------------------------------------
-            // 2. JOB COMMENT
-            // --------------------------------------------------
-            // if (comment?.trim()) {
-            //   await tx
-            //     .insert(jobComments)
-            //     .values({
-            //       jobId: job.id,
-            //       jobItemId: null,
-            //       userId: customerId,
-            //       comment: comment.trim(),
-            //     });
-            // }
-            // --------------------------------------------------
-            // 3. CREATE JOB ITEMS
-            // --------------------------------------------------
             const jobItemsToInsert = items.map((item) => ({
                 id: crypto.randomUUID(),
                 jobId: job.id,
@@ -221,10 +202,6 @@ export const createCustomerJob = async (req, res) => {
                 .insert(jobItems)
                 .values(jobItemsToInsert)
                 .returning();
-            // --------------------------------------------------
-            // 4. JOB TRANSITION
-            // created -> in_progress
-            // --------------------------------------------------
             const updatedJob = await transitionJob({
                 jobId: job.id,
                 previousStatus: 'created',
@@ -876,6 +853,7 @@ export const getCustomerPendingQuotes = async (req, res) => {
                         quantity: line.quantity,
                         unitPrice: line.unitPrice,
                         lineTotal: line.lineTotal,
+                        warrantyMonths: line.warrantyMonths,
                     })),
                     componentsCost: quoteItem.componentsCost,
                     serviceCharge: quoteItem.serviceCharge,
