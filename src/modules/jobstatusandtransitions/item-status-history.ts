@@ -27,6 +27,7 @@ export const allowedJobItemTransitions: Record<
   created: [
     'pending_cs_verification',
     'awaiting_customer_approval',
+    'approved_for_transport',
   ],
 
   pending_cs_verification: [

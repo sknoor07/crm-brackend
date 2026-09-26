@@ -10,6 +10,7 @@ import {
 
 import { warranties } from "./warranties.js";
 import { jobs } from "./jobs.js";
+import { jobItems } from "./job-items.js";
 
 /* -------------------------------------------------------------------------- */
 /* Issue Category                                                             */
@@ -121,6 +122,8 @@ export const warrantyClaims = pgTable(
     })
       .notNull()
       .unique(),
+    
+    jobItemId:uuid("job_item_id").references(()=>jobItems.id).notNull(),
 
     repairJobId: uuid("repair_job_id")
       .references(() => jobs.id),

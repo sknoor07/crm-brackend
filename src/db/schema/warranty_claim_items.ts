@@ -9,6 +9,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { warrantyClaims } from "./warranty_claims.js";
+import { warranties } from "./warranties.js";
 
 
 export const warrantyClaimActionTypeValues = [
@@ -34,6 +35,10 @@ export const warrantyClaimItems = pgTable(
       .references(() => warrantyClaims.id, {
         onDelete: "cascade",
       })
+      .notNull(),
+
+      warrantyId: uuid("warranty_id")
+      .references(() => warranties.id)
       .notNull(),
 
     actionType: warrantyClaimActionType("action_type")

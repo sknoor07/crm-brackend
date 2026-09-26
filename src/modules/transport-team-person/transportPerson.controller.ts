@@ -432,6 +432,8 @@ export const completeTransportInspection = async (
       });
     }
 
+    
+
     // --------------------------------------------------
     // Map submitted inspections
     // --------------------------------------------------
@@ -451,10 +453,7 @@ export const completeTransportInspection = async (
     const finalItemOutcomes =
       inspectableItems.map(
         (existingItem) => {
-          const inspection =
-            inspectionByItemId.get(
-              existingItem.id,
-            );
+          const inspection =inspectionByItemId.get(existingItem.id,);
 
           if (!inspection) {
             throw new Error(
@@ -519,6 +518,7 @@ export const completeTransportInspection = async (
     // --------------------------------------------------
     // Determine overall job route
     // --------------------------------------------------
+    
 
     const hasLabItem =
       finalItemOutcomes.some(

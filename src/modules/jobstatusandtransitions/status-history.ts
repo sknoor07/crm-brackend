@@ -8,6 +8,7 @@ export const allowedJobTransitions: Record<
 > = {
   created: [
     'in_progress',
+    'assigning_pickup_Engineer',
   ],
 
   in_progress: [
@@ -22,6 +23,7 @@ export const allowedJobTransitions: Record<
   pending_visit: [
     'pending_final_quote', //onsite
     'going_to_lab',
+    'delivered',
   ],
 
   pending_final_quote: [

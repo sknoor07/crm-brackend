@@ -1,15 +1,15 @@
 import { Request, Response } from "express";
-import { createWarrantyClaim, getWarranties, getWarrantyById, updateWarrantyClaimInspection } from "./warranty.service.js";
+import { createWarrantyClaim, getWarranties, getWarrantyByJobId, updateWarrantyClaimInspection } from "./warranty.service.js";
 import { createWarrantyClaimSchema, updateWarrantyClaimInspectionSchema } from "./warranty.validation.js";
 
-export const getWarranty = async (
-  req: Request,
+export const getWarrantyInfoUsingJobID = async (
+  req: Request<{jobId:string}>,
   res: Response,
 ) => {
   try {
-    const { warrantyId } = req.params;
+    const jobId = req.params.jobId;
 
-    const warranty = await getWarrantyById(warrantyId);
+    const warranty = await getWarrantyByJobId(jobId);
 
     if (!warranty) {
       return res.status(404).json({
@@ -43,7 +43,7 @@ export const getWarrantyList = async (
     const result = await getWarranties({
       status:
         typeof filters.status === "string"
-          ? filters.status
+          ? (filters.status as Parameters<typeof getWarranties>[0]["status"])
           : undefined,
 
       customerId:
@@ -101,12 +101,13 @@ export const getWarrantyList = async (
 };
 
 
-export const createClaim = async (
-  req: Request,
-  res: Response,
-) => {
+export const createClaim = async (req: Request<{warrantyId:string}>,res: Response,) => {
   try {
-    const { warrantyId } = req.params;
+    const  warrantyId  = req.params.warrantyId;
+    const userId =<string> req.user?.userId;
+    if(!userId){
+      res.status(401).json({message:"Unauthorised Accesss"});
+    }
 
     const parsed = createWarrantyClaimSchema.safeParse(
       req.body,
@@ -123,6 +124,7 @@ export const createClaim = async (
     const result = await createWarrantyClaim(
       warrantyId,
       parsed.data,
+      userId,
     );
 
     return res.status(201).json({
@@ -156,11 +158,11 @@ export const createClaim = async (
 };
 
 export const updateClaimInspection = async (
-  req: Request,
+  req: Request<{claimId:string}>,
   res: Response,
 ) => {
   try {
-    const { claimId } = req.params;
+    const  claimId = req.params.claimId;
 
     // 1. Validate body
     const parsed =

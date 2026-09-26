@@ -1,13 +1,18 @@
 import { Router } from "express";
-import { createClaim, getWarranty, getWarrantyList, updateClaimInspection } from "./warranty.controller.js";
-import { warrantyIdParamSchema } from "./warranty.validation.js";
+import { createClaim, getWarrantyInfoUsingJobID, getWarrantyList, updateClaimInspection } from "./warranty.controller.js";
+import { claimIdParamSchema, jobIdParamSchema, warrantyIdParamSchema } from "./warranty.validation.js";
 import { validateRequest } from "../../shared/middleware/validateRequest.js";
+import { requireAuth, requireRole } from "../../shared/middleware/auth.js";
 
 const router = Router();
-router.post("/:warrantyId/claims",createClaim,);
-router.get("/:warrantyId", validateRequest(warrantyIdParamSchema,"params"), getWarranty);
+router.use(requireAuth);
+const csRoles = [
+  'customer_service',
+];
+router.post("/:warrantyId/claims",validateRequest(warrantyIdParamSchema,"params"),requireRole(csRoles),createClaim,);
+router.patch("/claims/:claimId/inspection",validateRequest(claimIdParamSchema,"params"),updateClaimInspection,);
 
-router.patch("/claims/:claimId/inspection",updateClaimInspection,);
+router.get("/:jobId",validateRequest(jobIdParamSchema,"params"),getWarrantyInfoUsingJobID);
 
 router.get("/", getWarrantyList);
 

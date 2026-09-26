@@ -15,19 +15,21 @@ import { jobItemQuoteLines } from "../../db/schema/job-item-quote-lines.js";
 import { generateWarrantyClaimNumber, getRepeatRepairLevel, getWarrantyStatus } from "./warranty.helpers.js";
 import { WarrantyListFilters } from "./warranty.types.js";
 import { CreateWarrantyClaimInput, UpdateWarrantyClaimInspectionInput } from "./warranty.validation.js";
+import { generateJobNumber } from "../../shared/utils/jobNumber.js";
+import { transitionJob } from "../jobstatusandtransitions/transition-job.js";
+import { updateJobItemWithStatusTransition } from "../jobstatusandtransitions/item-status-history.js";
 
-export const getWarrantyById = async (warrantyId: string) => {
+export const getWarrantyByJobId = async (jobId: string) => {
     // --------------------------------------------------
     // 1. Warranty
     // --------------------------------------------------
 
-    const [warranty] = await db
+    const warrantiesResult = await db
         .select()
         .from(warranties)
-        .where(eq(warranties.id, warrantyId))
-        .limit(1);
+        .where(eq(warranties.jobId, jobId))
 
-    if (!warranty) {
+    if (!warrantiesResult || warrantiesResult.length === 0) {
         return null;
     }
 
@@ -38,7 +40,7 @@ export const getWarrantyById = async (warrantyId: string) => {
     const [job] = await db
         .select()
         .from(jobs)
-        .where(eq(jobs.id, warranty.jobId))
+        .where(eq(jobs.id, jobId))
         .limit(1);
 
     // --------------------------------------------------
@@ -48,165 +50,130 @@ export const getWarrantyById = async (warrantyId: string) => {
     const [jobItem] = await db
         .select()
         .from(jobItems)
-        .where(eq(jobItems.id, warranty.jobItemId))
-        .limit(1);
+        .where(eq(jobItems.jobId, jobId));
 
     // --------------------------------------------------
     // 4. Customer user
     // --------------------------------------------------
 
     let user = null;
-
-    if (job?.customerId) {
-        [user] = await db
-            .select()
-            .from(users)
-            .where(eq(users.id, job.customerId))
-            .limit(1);
-    }
-
-    // --------------------------------------------------
-    // 5. Customer profile
-    // --------------------------------------------------
-
     let customerProfile = null;
 
     if (job?.customerId) {
-        [customerProfile] = await db
-            .select()
-            .from(customerProfiles)
-            .where(eq(customerProfiles.userId, job.customerId))
-            .limit(1);
+        [user] = await db.select().from(users).where(eq(users.id, job.customerId)).limit(1);
+        [customerProfile] = await db.select().from(customerProfiles).where(eq(customerProfiles.userId, job.customerId)).limit(1);
     }
+
+
 
     // --------------------------------------------------
     // 6. Quote line
     // --------------------------------------------------
+    const quoteLineIds = warrantiesResult
+        .map((w) => w.quoteLineId)
+        .filter((id): id is string => id !== null);
 
-    let quoteLine = null;
 
-    if (warranty.quoteLineId) {
-        [quoteLine] = await db
+    let quoteLines: any = [];
+    if (quoteLineIds.length > 0) {
+        quoteLines = await db
             .select()
             .from(jobItemQuoteLines)
-            .where(eq(jobItemQuoteLines.id, warranty.quoteLineId))
-            .limit(1);
+            .where(inArray(jobItemQuoteLines.id, quoteLineIds));
     }
 
     // --------------------------------------------------
     // 7. Warranty claims
     // --------------------------------------------------
-
-    const claims = await db
-        .select()
-        .from(warrantyClaims)
-        .where(eq(warrantyClaims.warrantyId, warrantyId))
-        .orderBy(warrantyClaims.reportedAt);
-
+    const warrantyIds = warrantiesResult.map(row => row.id);
+    let claims: any = [];
+    if (warrantyIds.length > 0) {
+        claims = await db
+            .select()
+            .from(warrantyClaims)
+            .where(inArray(warrantyClaims.warrantyId, warrantyIds))
+            .orderBy(warrantyClaims.reportedAt);
+    }
     // --------------------------------------------------
     // 8. Claim items
     // --------------------------------------------------
+    let claimItems: any = [];
+    let repairJobs: any = [];
+    let claimsWithDetails = [];
 
-    const claimIds = claims.map((claim) => claim.id);
+    if (claims.length > 0) {
+        const claimIds = claims.map((claim: any) => claim.id);
 
-    const claimItems =
-        claimIds.length > 0
-            ? await db
+        claimItems = await db
+            .select()
+            .from(warrantyClaimItems)
+            .where(inArray(warrantyClaimItems.warrantyClaimId, claimIds));
+
+        const repairJobIds = claims
+            .map((claim: any) => claim.repairJobId)
+            .filter((id: string): id is string => id !== null);
+
+        if (repairJobIds.length > 0) {
+            repairJobs = await db
                 .select()
-                .from(warrantyClaimItems)
-                .where(
-                    inArray(
-                        warrantyClaimItems.warrantyClaimId,
-                        claimIds,
-                    ),
-                )
-            : [];
+                .from(jobs)
+                .where(inArray(jobs.id, repairJobIds));
+        }
+    }
+
+
 
     // --------------------------------------------------
     // 9. Get repair jobs for claims
     // --------------------------------------------------
 
-    const repairJobIds = claims
-        .map((claim) => claim.repairJobId)
-        .filter(
-            (id): id is string => id !== null,
-        );
-
-    const repairJobs =
-        repairJobIds.length > 0
-            ? await db
-                .select()
-                .from(jobs)
-                .where(inArray(jobs.id, repairJobIds))
-            : [];
 
     // --------------------------------------------------
     // 10. Build claims response
     // --------------------------------------------------
-
-    const claimsWithDetails = claims.map((claim) => {
-        const repairJob =
-            claim.repairJobId
-                ? repairJobs.find(
-                    (job) => job.id === claim.repairJobId,
-                ) ?? null
+    if (claims.length > 0) {
+        claimsWithDetails = claims.map((claim: any) => {
+            const repairJob = claim.repairJobId
+                ? repairJobs.find((j: any) => j.id === claim.repairJobId) ?? null
                 : null;
+            const items = claimItems.filter((item: any) => item.warrantyClaimId === claim.id);
 
-        const items = claimItems.filter(
-            (item) =>
-                item.warrantyClaimId === claim.id,
-        );
+            return { ...claim, repairJob, items };
+        });
+    }
 
-        return {
-            ...claim,
-            repairJob,
-            items,
-        };
-    });
+
 
     // --------------------------------------------------
     // 11. Effective warranty status
     // --------------------------------------------------
-
-    const effectiveWarrantyStatus =
-        getWarrantyStatus(
-            warranty.warrantyEnd,
-            warranty.warrantyStatus,
-        );
+    let effectiveWarrantyStatus = "expired";
+    for (const warranty of warrantiesResult) {
+        const status = getWarrantyStatus(warranty.warrantyEnd, warranty.warrantyStatus);
+        if (status === "active") {
+            effectiveWarrantyStatus = "active";
+            break; // If at least one is active, the overall status is active
+        }
+    }
 
     // --------------------------------------------------
     // 12. Claim summary
     // --------------------------------------------------
-
-    const totalClaims =
-        claimsWithDetails.length;
-
-    const openClaims =
-        claimsWithDetails.filter(
-            (claim) =>
-                ![
-                    "completed",
-                    "rejected",
-                    "cancelled",
-                ].includes(claim.status),
-        ).length;
-
-    const completedClaims =
-        claimsWithDetails.filter(
-            (claim) =>
-                claim.status === "completed",
-        ).length;
+    const totalClaims = claimsWithDetails.length;
+    const openClaims = claimsWithDetails.filter(
+        (claim: any) => !["completed", "rejected", "cancelled"].includes(claim.status)
+    ).length;
+    const completedClaims = claimsWithDetails.filter(
+        (claim: any) => claim.status === "completed"
+    ).length;
 
     // --------------------------------------------------
     // 13. Final response
     // --------------------------------------------------
 
     return {
-        warranty: {
-            ...warranty,
-            warrantyStatus:
-                effectiveWarrantyStatus,
-        },
+        warranties: warrantiesResult,
+        warrantyStatus: effectiveWarrantyStatus,
 
         originalJob: job ?? null,
 
@@ -221,7 +188,7 @@ export const getWarrantyById = async (warrantyId: string) => {
             }
             : null,
 
-        quoteLine,
+        quoteLine: quoteLines,
 
         claims: claimsWithDetails,
 
@@ -463,126 +430,207 @@ export const getWarranties = async (
 };
 
 export const createWarrantyClaim = async (
-  warrantyId: string,
-  input: CreateWarrantyClaimInput,
+    warrantyId: string,
+    input: CreateWarrantyClaimInput,
+    userId:string,
 ) => {
-  // 1. Find warranty
-  const [warranty] = await db
-    .select()
-    .from(warranties)
-    .where(eq(warranties.id, warrantyId))
-    .limit(1);
+    // 1. Find warranty
+    const [warranty] = await db
+        .select()
+        .from(warranties)
+        .where(eq(warranties.id, warrantyId))
+        .limit(1);
 
-  if (!warranty) {
-    throw new Error("WARRANTY_NOT_FOUND");
-  }
+    if (!warranty) {
+        throw new Error("WARRANTY_NOT_FOUND");
+    }
 
-  // 2. Check effective warranty status
-  const effectiveStatus = getWarrantyStatus(
-    warranty.warrantyEnd,
-    warranty.warrantyStatus,
-  );
+    // 2. Check effective warranty status
+    const effectiveStatus = getWarrantyStatus(
+        warranty.warrantyEnd,
+        warranty.warrantyStatus,
+    );
 
-  if (effectiveStatus !== "active") {
-    throw new Error("WARRANTY_NOT_ACTIVE");
-  }
+    if (effectiveStatus !== "active") {
+        throw new Error("WARRANTY_NOT_ACTIVE");
+    }
 
-  // 3. Calculate rolling 30-day claim history
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // 3. Calculate rolling 30-day claim history
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-  const recentClaims = await db
-    .select()
-    .from(warrantyClaims)
-    .where(
-      and(
-        eq(warrantyClaims.warrantyId, warrantyId),
-        gte(warrantyClaims.reportedAt, thirtyDaysAgo),
-      ),
-    )
-    .orderBy(desc(warrantyClaims.reportedAt));
+    const recentClaims = await db
+        .select()
+        .from(warrantyClaims)
+        .where(
+            and(
+                eq(warrantyClaims.warrantyId, warrantyId),
+                gte(warrantyClaims.reportedAt, thirtyDaysAgo),
+            ),
+        )
+        .orderBy(desc(warrantyClaims.reportedAt));
 
-  // Existing claims + the new claim
-  const totalRecentClaims = recentClaims.length + 1;
+    // Existing claims + the new claim
+    const totalRecentClaims = recentClaims.length + 1;
 
-  const repeatRepairLevel =
-    getRepeatRepairLevel(totalRecentClaims);
+    const repeatRepairLevel =
+        getRepeatRepairLevel(totalRecentClaims);
 
-  // 4. Generate claim number
-  const [{ total }] = await db
-    .select({
-      total: count(),
-    })
-    .from(warrantyClaims);
+    // 4. Generate claim number
+    const [{ total }] = await db
+        .select({
+            total: count(),
+        })
+        .from(warrantyClaims);
 
-  const claimNumber = generateWarrantyClaimNumber(
-    Number(total) + 1,
-  );
+    const claimNumber = generateWarrantyClaimNumber(
+        Number(total) + 1,
+    );
 
-  // 5. Create claim
-  const [claim] = await db
-    .insert(warrantyClaims)
-    .values({
-      warrantyId,
-      claimNumber,
-      reasonForReturn: input.reasonForReturn,
-      issueCategory: input.issueCategory,
-      notes: input.notes ?? null,
+    
 
-      // Technician fills these during inspection
-      failureType: null,
-      diagnosis: null,
+    const id = crypto.randomUUID();
+    const jobNumber = generateJobNumber();
+    const result = await db.transaction(async (tx) => {
+        const [claim] = await tx
+        .insert(warrantyClaims)
+        .values({
+            warrantyId,
+            claimNumber,
+            reasonForReturn: input.reasonForReturn,
+            issueCategory: input.issueCategory,
+            notes: input.notes ?? null,
+            jobItemId:input.jobItemId,
 
-      status: "open",
-      warrantyResult: null,
+            // Technician fills these during inspection
+            failureType: null,
+            diagnosis: null,
 
-      reportedAt: new Date(),
-    })
-    .returning();
+            status: "open",
+            warrantyResult: null,
 
-  return {
-    claim,
-    repeatRepair: {
-      recentClaimCount: totalRecentClaims,
-      level: repeatRepairLevel,
-      windowDays: 30,
-    },
-  };
+            reportedAt: new Date(),
+        })
+        .returning();
+
+        const [job] = await tx.insert(jobs).values({
+            id: id,
+            jobNumber,
+            customerId: input.customerId,
+            currentStatus: 'created',
+        }).returning();
+        const [existingItem] = await tx
+            .select()
+            .from(jobItems)
+            .where(eq(jobItems.id, input.jobItemId))
+            .limit(1);
+        if (!existingItem) {
+    throw new Error("Original job item not found");
+}
+const { id: oldId, createdAt, updatedAt, ...restOfItemData } = existingItem;
+
+        const createdJobItems = await tx
+            .insert(jobItems)
+            .values({ ...restOfItemData, jobId: job.id, issueDescription: input.reasonForReturn, currentStatus: 'created',isWarrantyClaim:true })
+            .returning();
+
+        const updatedJob = await transitionJob({
+                jobId: job.id,
+                previousStatus: 'created',
+                newStatus: 'assigning_pickup_Engineer',
+                changedBy: userId,
+                note: 'claimed opened and job send for pickup',
+                comment: input.notes?.trim() ?? "",
+                existingTx: tx,
+        
+                updateJob: async (tx) => {
+                  const [updated] = await tx
+                    .update(jobs)
+                    .set({
+                      currentStatus: 'assigning_pickup_Engineer',
+                      updatedAt: new Date(),
+                    })
+                    .where(eq(jobs.id, job.id))
+                    .returning();
+        
+                  return updated;
+                },
+              });
+        const updatedItem =
+                  await updateJobItemWithStatusTransition(
+                    createdJobItems[0].id,
+                    'created',
+                    'approved_for_transport',
+        
+                    async (tx) => {
+                      const [updated] = await tx
+                        .update(jobItems)
+                        .set({
+                          currentStatus:
+                            'approved_for_transport',
+                          updatedAt: new Date(),
+                        })
+                        .where(eq(jobItems.id, createdJobItems[0].id))
+                        .returning();
+                        return updated
+                    },
+                    userId,
+                    'claim started for job item and send for transportation',
+                    tx,
+                );
+            return {
+                job:updatedJob,
+                jobItem:updatedItem,
+                claim,
+            }
+    });
+
+    return {
+         claim:result.claim,
+        repeatRepair: {
+            recentClaimCount: totalRecentClaims,
+            level: repeatRepairLevel,
+            windowDays: 30,
+        },
+        job:result.job,
+        jobItem:result.jobItem,
+       
+    };
 };
 
 export const updateWarrantyClaimInspection = async (
-  claimId: string,
-  input: UpdateWarrantyClaimInspectionInput,
+    claimId: string,
+    input: UpdateWarrantyClaimInspectionInput,
 ) => {
-  // 1. Find claim
-  const [claim] = await db
-    .select()
-    .from(warrantyClaims)
-    .where(eq(warrantyClaims.id, claimId))
-    .limit(1);
+    // 1. Find claim
+    const [claim] = await db
+        .select()
+        .from(warrantyClaims)
+        .where(eq(warrantyClaims.id, claimId))
+        .limit(1);
 
-  if (!claim) {
-    throw new Error("CLAIM_NOT_FOUND");
-  }
+    if (!claim) {
+        throw new Error("CLAIM_NOT_FOUND");
+    }
 
-  // 2. Inspection can only start for an open claim
-  if (claim.status !== "open") {
-    throw new Error("CLAIM_NOT_OPEN");
-  }
+    // 2. Inspection can only start for an open claim
+    if (claim.status !== "open") {
+        throw new Error("CLAIM_NOT_OPEN");
+    }
 
-  // 3. Update inspection details
-  const [updatedClaim] = await db
-    .update(warrantyClaims)
-    .set({
-      diagnosis: input.diagnosis,
-      failureType: input.failureType,
-      notes: input.notes ?? claim.notes,
-      status: "under_inspection",
-      inspectedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(warrantyClaims.id, claimId))
-    .returning();
+    // 3. Update inspection details
+    const [updatedClaim] = await db
+        .update(warrantyClaims)
+        .set({
+            diagnosis: input.diagnosis,
+            failureType: input.failureType,
+            notes: input.notes ?? claim.notes,
+            status: "under_inspection",
+            inspectedAt: new Date(),
+            updatedAt: new Date(),
+        })
+        .where(eq(warrantyClaims.id, claimId))
+        .returning();
 
-  return updatedClaim;
+    return updatedClaim;
 };

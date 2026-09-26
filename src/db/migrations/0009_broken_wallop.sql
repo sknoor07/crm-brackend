@@ -1,0 +1,4 @@
+ALTER TABLE "warranty_claims" ADD COLUMN "job_item_id" varchar;--> statement-breakpoint
+ALTER TABLE "warranty_claim_items" ADD COLUMN "warranty_id" uuid NOT NULL;--> statement-breakpoint
+ALTER TABLE "warranty_claims" ADD CONSTRAINT "warranty_claims_job_item_id_job_items_id_fk" FOREIGN KEY ("job_item_id") REFERENCES "public"."job_items"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "warranty_claim_items" ADD CONSTRAINT "warranty_claim_items_warranty_id_warranties_id_fk" FOREIGN KEY ("warranty_id") REFERENCES "public"."warranties"("id") ON DELETE no action ON UPDATE no action;

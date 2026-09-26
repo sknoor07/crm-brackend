@@ -64,6 +64,13 @@
       "when": 1790318498275,
       "tag": "0008_icy_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790426526985,
+      "tag": "0009_broken_wallop",
+      "breakpoints": true
     }
   ]
 }

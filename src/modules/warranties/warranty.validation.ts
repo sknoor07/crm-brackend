@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { warrantyFailureTypeValues, warrantyIssueCategoryValues } from "../../db/schema/warranty_claims.js";
+import { en } from "zod/locales";
 
 export const warrantyIdParamSchema = z.object({
   warrantyId: z.string().uuid("Invalid warranty ID"),
 });
 
-export type WarrantyIdParamSchema= z.infer<typeof warrantyIdParamSchema>
+export type WarrantyIdParamSchema = z.infer<typeof warrantyIdParamSchema>
 
 export const claimIdParamSchema = z.object({
   claimId: z.string().uuid("Invalid claim ID"),
@@ -14,6 +15,15 @@ export const claimIdParamSchema = z.object({
 export type ClaimIdParamSchema = z.infer<
   typeof claimIdParamSchema
 >;
+
+
+export const jobIdParamSchema = z.object({
+  jobId: z.string().uuid("Invalid Job ID"),
+});
+
+export type JobIdParamSchema = z.infer<
+  typeof jobIdParamSchema
+>
 
 export const warrantySearchSchema = z.object({
   status: z
@@ -71,25 +81,13 @@ export type WarrantySearchInput = z.infer<
 >;
 
 export const createWarrantyClaimSchema = z.object({
-  reasonForReturn: z
-    .string()
-    .trim()
-    .min(3, "Reason for return is required")
-    .max(2000),
-
-  issueCategory: z.enum(
-    warrantyIssueCategoryValues,
-  ),
-
-  notes: z
-    .string()
-    .trim()
-    .max(5000)
-    .optional(),
+  jobId:z.string().uuid("Invalid Job ID"),
+  customerId:z.string().uuid("Invalid Customer id"),
+  jobItemId:z.string().uuid("Invalid Item Id"),
+  reasonForReturn:z.string().min(6,"Please Enter Atleast 3 words").max(2000,"cannot type more than 2000 characters"),
+  issueCategory: z.enum(warrantyIssueCategoryValues),
+  notes:z.string().max(2000,"cannot have more than 2000 charcters"),
 });
-export type CreateWarrantyClaimInput = z.infer<
-  typeof createWarrantyClaimSchema
->;
 
 export const updateWarrantyClaimInspectionSchema =
   z.object({
@@ -110,10 +108,13 @@ export const updateWarrantyClaimInspectionSchema =
       .optional(),
   });
 
-  export type UpdateWarrantyClaimInspectionInput =
-  z.infer<
-    typeof updateWarrantyClaimInspectionSchema
-  >;
+export type CreateWarrantyClaimInput = z.infer<
+  typeof createWarrantyClaimSchema
+>;
+
+export type UpdateWarrantyClaimInspectionInput = z.infer<
+  typeof updateWarrantyClaimInspectionSchema
+>;
 
 //   One thing to note: failureType is not required when creating the claim.
 
